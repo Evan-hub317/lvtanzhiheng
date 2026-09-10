@@ -1,0 +1,62 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: smart-carbon
+  servlet:
+    multipart:
+      # 知识库文档上传限制（扫描版 PDF 体积较大）
+      max-file-size: 20MB
+      max-request-size: 20MB
+  # 数据库：先执行 docs/sql/init.sql，再按本机修改用户名密码
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/smart_carbon?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: root
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    # 开发期打印 SQL，上线前移除
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+
+# Sa-Token 配置：前端请求头携带 satoken
+sa-token:
+  token-name: satoken
+  timeout: 86400
+  is-log: false
+
+# Python 算法服务地址（预测/仿真/异常检测/RAG）
+algo:
+  base-url: http://localhost:8000
+
+# 应用配置
+app:
+  # 知识库文档存储目录
+  upload-dir: uploads
+
+# Knife4j 接口文档（启动后访问 http://localhost:8080/doc.html）
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn

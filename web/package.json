@@ -1,0 +1,25 @@
+{
+  "name": "smart-carbon-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "绿碳智衡 - 区域碳排放大数据监测与仿真决策平台前端",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.1",
+    "axios": "^1.6.8",
+    "docx-preview": "^0.3.3",
+    "echarts": "^5.5.0",
+    "element-plus": "^2.7.0",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.0",
+    "vue-router": "^4.3.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "vite": "^5.2.0"
+  }
+}
