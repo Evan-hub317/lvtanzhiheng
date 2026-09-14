@@ -3,10 +3,13 @@ package com.smart.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.smart.entity.DimRegion;
 import com.smart.entity.FactEnergyMonth;
+import com.smart.entity.ProvinceParam;
 import com.smart.mapper.DimRegionMapper;
 import com.smart.mapper.FactEmissionMonthMapper;
 import com.smart.mapper.FactEmissionYearMapper;
 import com.smart.mapper.FactEnergyMonthMapper;
+import com.smart.mapper.ProvinceParamMapper;
+import com.smart.vo.CalcResultVO;
 import com.smart.vo.GenerateResultVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,40 +17,44 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * 模拟数据生成器（无硬件方案的核心）
+ * 全国碳排放模拟数据生成器（SRS-CG 第 2.3/2.4 节）
  * <p>
- * 数据规律：
- * 1. 区域下钻：为每个市自动扩展 10 个区县（level=3），区县 GDP 按市 GDP 均分 ±18% 浮动；
- * 2. 行业结构：按「每亿元 GDP 能源消费强度 × 行业占比矩阵」生成，与真实行业规律一致
- * （电力行业耗煤为主、交通行业油品为主、工业多能并举）；
- * 3. 季节规律：每个行业内置 12 个月季节系数（电力夏冬双峰、建筑冬季低谷、农业 4-10 月高峰）；
- * 4. 年增长：燃料 1.5%/年、电力 3.0%/年（电气化趋势）；
- * 5. 随机波动 ±5%；
- * 6. 异常注入：约 0.4% 的记录放大 3~4.5 倍（模拟偷排/数据造假，供孤立森林演示）。
+ * 数据模型：
+ * 月消费 = 市GDP × 行业能源强度/12 × 能耗强度系数 × 能源结构系数 × 产业结构系数
+ *         × 季节因子 × 供暖因子 × 年增长 × 随机波动
  * <p>
- * 演示配置（8 市 × 10 区县 × 5 行业 × 8 能源 × 12 月 × 5 年 ≈ 19 万条），
- * 支持按需扩展年份与区域实现百万级数据量。
+ * 省际差异化（省级参数，公开统计近似值）：
+ * - 能耗强度系数 = 省能耗强度 / 全国均值（山西/宁夏高、北京/上海低）
+ * - 能源结构系数 = 煤炭占比相对全国均值的偏差（煤炭类与清洁类反向调整）
+ * - 产业结构系数 = 二产占比偏差（工业/电力行业与服务业行业反向调整，弹性 0.6）
+ * - 供暖因子：北方省份 11~3 月热力 3.2 倍峰值、燃料 1.15 倍、电力 1.1 倍
+ * <p>
+ * 模式：all 全量（2021 至今已过完的月份）/ recent 增量（仅上月，幂等：先删该月再插）
+ * 规模：424 市 × 24 组合 × 12 月 × 6 年 ≈ 73 万条
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class DataGenerateService {
 
-    private static final String[] COUNTY_SUFFIX = {
-            "城关区", "滨湖区", "临港区", "新城区", "高新区",
-            "经开区", "工业园区", "生态区", "示范区", "科创区"
-    };
+    // ---- 全国基准（校准锚点：全国年排放约 115 亿吨 CO2） ----
+    private static final double NATIONAL_ENERGY_INTENSITY = 0.55;  // 全国平均能耗强度（吨标煤/万元）
+    private static final double NATIONAL_COAL_RATIO = 55.0;        // 全国平均煤炭占能源消费比重（%）
+    private static final double NATIONAL_SECONDARY_RATIO = 39.0;   // 全国平均二产占 GDP 比重（%）
+    /** 能耗强度年均下降率（技术效率提升，全国趋势） */
+    private static final double ENERGY_EFFICIENCY_DECLINE = 0.985;
 
     /**
-     * 每亿元 GDP 的【年度】能源消费强度（行业 × 能源，索引 0 起）
+     * 每亿元 GDP 的【年度】能源消费强度（行业 × 能源，索引 0 起，全国平均口径）
      * 单位：原煤/焦炭/原油/汽油/柴油=吨、天然气=万m³、电力=万kWh、热力=GJ
-     * 按演示省 8.5 万亿 GDP 校准：全省年排放约 2.7 亿吨 CO2
-     * 注意：生成月度数据时需除以 12 转为月强度
      */
     private static final double[][] INTENSITY = {
             //  原煤    焦炭    原油   汽油    柴油   天然气  电力    热力
@@ -58,7 +65,7 @@ public class DataGenerateService {
             {  25.0,   0.0,   0.0,   9.2,  22.4,   0.0,  68.0,    0 }   // 农业
     };
 
-    /** 季节系数（行业 × 12 月，年均约 1.0） */
+    /** 基础季节系数（行业 × 12 月，年均约 1.0） */
     private static final double[][] SEASON = {
             { 1.15, 1.10, 0.95, 0.85, 0.85, 1.00, 1.20, 1.20, 0.90, 0.80, 0.95, 1.15 }, // 电力：夏冬双峰
             { 0.85, 0.80, 1.02, 1.05, 1.05, 1.05, 1.00, 1.00, 1.05, 1.08, 1.05, 1.00 }, // 工业：春节低谷
@@ -67,78 +74,130 @@ public class DataGenerateService {
             { 0.60, 0.60, 0.80, 1.20, 1.30, 1.30, 1.25, 1.20, 1.10, 1.10, 0.80, 0.60 }  // 农业：农忙期高峰
     };
 
-    /** 年增长率（energy_id 1~8 索引 0 起）：燃料 1.5%、天然气 1.2%、电力 3.0%、热力 2.0% */
-    private static final double[] YEAR_GROWTH = {
-            1.015, 1.015, 1.015, 1.015, 1.015, 1.012, 1.030, 1.020
-    };
+    /** 供暖因子（北方供暖省份叠加） */
+    private static final double[] HEATING_THERMAL = {3.2, 2.8, 2.0, 1.0, 0.5, 0.3, 0.3, 0.3, 0.4, 0.8, 2.2, 3.0}; // 热力
+    private static final double[] HEATING_FUEL = {1.15, 1.15, 1.05, 1.0, 0.95, 0.95, 0.95, 0.95, 0.95, 1.0, 1.10, 1.15}; // 原煤/天然气
+    private static final double[] HEATING_POWER = {1.10, 1.05, 1.0, 0.95, 0.95, 1.0, 1.05, 1.05, 1.0, 0.95, 1.05, 1.10}; // 电力
 
     private final DimRegionMapper regionMapper;
+    private final ProvinceParamMapper paramMapper;
     private final FactEnergyMonthMapper energyMonthMapper;
     private final FactEmissionMonthMapper emissionMonthMapper;
     private final FactEmissionYearMapper emissionYearMapper;
     private final FactEnergyMonthService energyMonthService;
+    private final CalcService calcService;
 
     /**
-     * 生成模拟数据（覆盖旧模拟数据）
-     *
-     * @param years          年份跨度（默认 5）
-     * @param endYear        结束年份（默认当前年）
-     * @param injectAnomaly  是否注入异常值
+     * 月度自动任务（CG-11）：每月 1 日 00:30 生成"已过完的最新月份"数据并自动核算
      */
-    public GenerateResultVO generate(int years, int endYear, boolean injectAnomaly) {
+    @org.springframework.scheduling.annotation.Scheduled(cron = "0 30 0 1 * ?")
+    public void scheduledMonthlyGenerate() {
+        try {
+            GenerateResultVO vo = generate("recent", 2021, true);
+            log.info("月度自动数据生成完成：{} 条，{} 至 {}-{}，异常 {} 条，耗时 {}s",
+                    vo.getTotalCount(), vo.getStartYear(), vo.getEndYear(), vo.getEndYear(), vo.getAnomalyCount(), vo.getSeconds());
+            CalcResultVO calc = calcService.execute(0, 0);
+            log.info("月度自动核算完成：月度 {} 行，年度 {} 行，耗时 {}s", calc.getMonthRows(), calc.getYearRows(), calc.getSeconds());
+        } catch (Exception e) {
+            log.error("月度自动生成/核算失败（可手动调用 /data/generate mode=recent 补跑）", e);
+        }
+    }
+
+    /**
+     * 生成全国月度数据
+     *
+     * @param mode          all 全量（清空重建）/ recent 增量（仅上月，幂等）
+     * @param startYear     全量模式起始年份（默认 2021）
+     * @param injectAnomaly 是否注入异常值（0.4% 放大 3~4.5 倍，供 AI 检测演示）
+     */
+    public GenerateResultVO generate(String mode, int startYear, boolean injectAnomaly) {
         long start = System.currentTimeMillis();
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
-        // 1. 清理旧模拟数据与核算结果
-        energyMonthMapper.deleteSimulated();
-        emissionMonthMapper.deleteAll();
-        emissionYearMapper.deleteAll();
-        regionMapper.delete(new LambdaQueryWrapper<DimRegion>().eq(DimRegion::getLevel, 3));
-
-        // 2. 为每个市扩展 10 个区县
-        List<DimRegion> cities = regionMapper.selectList(
-                new LambdaQueryWrapper<DimRegion>().eq(DimRegion::getLevel, 2));
-        List<DimRegion> counties = new ArrayList<>();
-        for (DimRegion city : cities) {
-            String base = city.getRegionName().replace("市", "");
-            for (int i = 0; i < COUNTY_SUFFIX.length; i++) {
-                DimRegion county = new DimRegion();
-                county.setRegionCode(city.getRegionCode() + String.format("%02d", i + 1));
-                county.setRegionName(base + COUNTY_SUFFIX[i]);
-                county.setParentId(city.getId());
-                county.setLevel(3);
-                county.setGdp(BigDecimal.valueOf(city.getGdp().doubleValue() / 10.0 * (0.82 + random.nextDouble(0.36)))
-                        .setScale(2, RoundingMode.HALF_UP));
-                county.setSortOrder(i + 1);
-                counties.add(county);
-            }
+        // 1. 确定目标范围：起始年 ~ 已过完的最新月份
+        LocalDate now = LocalDate.now();
+        int lastYear = now.getYear();
+        int lastMonth = now.getMonthValue() - 1;
+        if (lastMonth == 0) {
+            lastMonth = 12;
+            lastYear -= 1;
         }
-        regionMapper.insertBatch(counties);
-        // 自定义批量插入不回填自增主键，重新查询获取真实 ID
-        counties = regionMapper.selectList(new LambdaQueryWrapper<DimRegion>()
-                .eq(DimRegion::getLevel, 3));
+        boolean fullMode = !"recent".equalsIgnoreCase(mode);
+        if (fullMode) {
+            if (startYear > lastYear) {
+                startYear = lastYear;
+            }
+        } else {
+            startYear = lastYear;
+        }
+        final int endYear = lastYear;
+        final int endMonth = lastMonth;
 
-        // 3. 生成月度活动数据
-        int yearStart = endYear - years + 1;
+        // 2. 清理旧数据（幂等）
+        if (fullMode) {
+            energyMonthMapper.deleteSimulated();
+            emissionMonthMapper.deleteAll();
+            emissionYearMapper.deleteAll();
+        } else {
+            energyMonthMapper.deleteMonth(endYear, endMonth);
+        }
+
+        // 3. 加载市级区域与省级参数
+        List<DimRegion> cities = regionMapper.selectList(new LambdaQueryWrapper<DimRegion>()
+                .eq(DimRegion::getLevel, 2));
+        Map<Integer, ProvinceParam> paramByProvince = new HashMap<>();
+        for (ProvinceParam p : paramMapper.selectList(null)) {
+            paramByProvince.put(p.getRegionId(), p);
+        }
+        if (cities.isEmpty() || paramByProvince.isEmpty()) {
+            log.error("区域或省级参数缺失：cities={}, params={}", cities.size(), paramByProvince.size());
+            throw new IllegalStateException("全国区域数据未初始化，请先执行 docs/sql/regions_cn.sql");
+        }
+
+        // 4. 生成
         long total = 0;
         int anomalyCount = 0;
+        int noParamCount = 0;
         List<FactEnergyMonth> batch = new ArrayList<>(2000);
 
-        for (DimRegion county : counties) {
-            double gdp = county.getGdp().doubleValue();
+        for (DimRegion city : cities) {
+            ProvinceParam param = paramByProvince.get(city.getParentId());
+            if (param == null || city.getGdp() == null || city.getGdp().signum() <= 0) {
+                noParamCount++;
+                continue;
+            }
+            double gdp = city.getGdp().doubleValue();
+            double eiFactor = param.getEnergyIntensity().doubleValue() / NATIONAL_ENERGY_INTENSITY;
+            double coalRatio = param.getCoalRatio().doubleValue();
+            double secRatio = param.getSecondaryRatio().doubleValue();
+            double growthBase = (1 + param.getGdpGrowth().doubleValue() / 100.0) * ENERGY_EFFICIENCY_DECLINE;
+            int heating = param.getHeating() == null ? 0 : param.getHeating();
+
             for (int industry = 0; industry < 5; industry++) {
                 for (int energy = 0; energy < 8; energy++) {
-                    // 年强度 ÷ 12 = 月强度
                     double intensity = INTENSITY[industry][energy] / 12.0;
                     if (intensity <= 0) {
                         continue;
                     }
-                    for (int year = yearStart; year <= endYear; year++) {
-                        double growth = Math.pow(YEAR_GROWTH[energy], year - yearStart);
-                        for (int month = 1; month <= 12; month++) {
-                            double value = gdp * intensity * growth * SEASON[industry][month - 1]
+                    // 能源结构系数：煤炭类随省煤炭占比调整，清洁类反向
+                    double coalAdj = (energy == 0 || energy == 1)
+                            ? coalRatio / NATIONAL_COAL_RATIO
+                            : (100.0 - coalRatio) / (100.0 - NATIONAL_COAL_RATIO);
+                    // 产业结构系数：二产占比偏差（工业/电力生产 vs 服务业行业，弹性 0.6）
+                    double secAdj = (industry == 0 || industry == 1)
+                            ? Math.pow(secRatio / NATIONAL_SECONDARY_RATIO, 0.6)
+                            : Math.pow((100.0 - secRatio) / (100.0 - NATIONAL_SECONDARY_RATIO), 0.6);
+
+                    for (int year = startYear; year <= endYear; year++) {
+                        int maxMonth = (year == endYear) ? endMonth : 12;
+                        double growth = Math.pow(growthBase, year - startYear);
+                        for (int month = 1; month <= maxMonth; month++) {
+                            double value = gdp * intensity * eiFactor * coalAdj * secAdj
+                                    * SEASON[industry][month - 1]
+                                    * heatingFactor(heating, energy, month)
+                                    * growth
                                     * (0.95 + random.nextDouble(0.10));
-                            // 单位换算：燃料吨→万吨、热力GJ→万GJ；天然气/电力单位一致
+                            // 单位换算：燃料吨→万吨、热力GJ→万GJ
                             if (energy < 5 || energy == 7) {
                                 value /= 10000.0;
                             }
@@ -147,7 +206,7 @@ public class DataGenerateService {
                                 anomalyCount++;
                             }
                             FactEnergyMonth row = new FactEnergyMonth();
-                            row.setRegionId(county.getId());
+                            row.setRegionId(city.getId());
                             row.setIndustryId(industry + 1);
                             row.setEnergyId(energy + 1);
                             row.setYear(year);
@@ -171,13 +230,30 @@ public class DataGenerateService {
 
         GenerateResultVO vo = new GenerateResultVO();
         vo.setTotalCount(total);
-        vo.setCountyCount(counties.size());
+        vo.setCountyCount(cities.size());
         vo.setAnomalyCount(anomalyCount);
-        vo.setStartYear(yearStart);
+        vo.setStartYear(startYear);
         vo.setEndYear(endYear);
         vo.setSeconds((System.currentTimeMillis() - start) / 1000);
-        log.info("模拟数据生成完成：{} 条，区县 {} 个，异常 {} 条，耗时 {}s",
-                total, counties.size(), anomalyCount, vo.getSeconds());
+        log.info("全国数据生成完成：{} 条（{} 市），{} 至 {}-{}，异常 {} 条，跳过无参数区域 {} 个，耗时 {}s",
+                total, cities.size(), startYear, endYear, endMonth, anomalyCount, noParamCount, vo.getSeconds());
         return vo;
+    }
+
+    /** 供暖因子：仅北方供暖省份，按能源品类叠加 */
+    private double heatingFactor(int heating, int energyIdx, int month) {
+        if (heating != 1) {
+            return 1.0;
+        }
+        if (energyIdx == 7) {
+            return HEATING_THERMAL[month - 1];
+        }
+        if (energyIdx == 0 || energyIdx == 5) {
+            return HEATING_FUEL[month - 1];
+        }
+        if (energyIdx == 6) {
+            return HEATING_POWER[month - 1];
+        }
+        return 1.0;
     }
 }

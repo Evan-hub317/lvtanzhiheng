@@ -59,6 +59,23 @@ public interface FactEmissionMonthMapper extends BaseMapper<FactEmissionMonth> {
             "GROUP BY region_id, industry_id, energy_id, year")
     int insertYearAgg(@Param("startYear") int startYear, @Param("endYear") int endYear);
 
+    /**
+     * 电力核算（区域电网因子）：按省份所属电网区域取对应因子
+     * 市级区域 → 上级省 → province_param.grid_code → 六大区域电网因子
+     */
+    @Insert("INSERT INTO fact_emission_month " +
+            "(region_id, industry_id, energy_id, year, month, emission, factor_value, oxid_rate, create_time) " +
+            "SELECT f.region_id, f.industry_id, 7, f.year, f.month, " +
+            "ROUND(SUM(f.consumption) * fe.factor_value * fe.oxid_rate, 4), fe.factor_value, fe.oxid_rate, NOW() " +
+            "FROM fact_energy_month f " +
+            "JOIN dim_region r ON r.id = f.region_id " +
+            "JOIN dim_region p ON p.id = IF(r.level = 2, r.parent_id, r.id) " +
+            "JOIN province_param pp ON pp.region_id = p.id " +
+            "JOIN factor_emission fe ON fe.energy_id = 7 AND fe.grid_code = pp.grid_code " +
+            "WHERE f.energy_id = 7 AND f.year BETWEEN #{startYear} AND #{endYear} " +
+            "GROUP BY f.region_id, f.industry_id, f.year, f.month, fe.factor_value, fe.oxid_rate")
+    int insertCalcMonthPower(@Param("startYear") int startYear, @Param("endYear") int endYear);
+
     /** 年度同比增速：与上一年度对比（%） */
     @Update("UPDATE fact_emission_year a " +
             "LEFT JOIN fact_emission_year b " +

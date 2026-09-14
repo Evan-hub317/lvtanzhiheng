@@ -10,6 +10,12 @@ const routes = [
     meta: { title: '登录' }
   },
   {
+    path: '/screen',
+    name: 'Screen',
+    component: () => import('@/views/screen/index.vue'),
+    meta: { title: '全国碳排放监测大屏' }
+  },
+  {
     path: '/',
     component: () => import('@/layout/index.vue'),
     redirect: '/dashboard',

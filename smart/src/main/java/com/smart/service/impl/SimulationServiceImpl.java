@@ -83,11 +83,19 @@ public class SimulationServiceImpl implements SimulationService {
         // 3. 月度结果聚合为年度
         PredictVO vo = new PredictVO();
         vo.setMethod(data.getStr("method"));
-        // 历史年度（t → 年）
+        // 历史年度（t → 年）；剔除最后一个不完整年（当前年尚未过完，避免年度曲线失真）
         Map<Integer, BigDecimal> histYearMap = new TreeMap<>();
         for (MonthPointVO m : months) {
             int year = startYear + (m.getT() - 1) / 12;
             histYearMap.merge(year, m.getEmission(), BigDecimal::add);
+        }
+        if (!histYearMap.isEmpty()) {
+            int lastYear = histYearMap.keySet().stream().max(Integer::compareTo).orElse(startYear);
+            long lastYearMonths = months.stream()
+                    .filter(m -> startYear + (m.getT() - 1) / 12 == lastYear).count();
+            if (lastYearMonths < 12) {
+                histYearMap.remove(lastYear);
+            }
         }
         vo.setHistoryYears(new ArrayList<>(histYearMap.keySet()));
         vo.setHistoryValues(histYearMap.values().stream()
@@ -99,6 +107,7 @@ public class SimulationServiceImpl implements SimulationService {
         List<BigDecimal> lowers = data.getJSONArray("lower").toList(BigDecimal.class);
         List<BigDecimal> uppers = data.getJSONArray("upper").toList(BigDecimal.class);
         Map<Integer, BigDecimal[]> forecastYearMap = new TreeMap<>();
+        Map<Integer, Integer> yearMonthCount = new TreeMap<>();
         for (int i = 0; i < ts.size(); i++) {
             int year = startYear + (ts.get(i) - 1) / 12;
             BigDecimal[] acc = forecastYearMap.computeIfAbsent(year,
@@ -106,6 +115,18 @@ public class SimulationServiceImpl implements SimulationService {
             acc[0] = acc[0].add(values.get(i));
             acc[1] = acc[1].add(lowers.get(i));
             acc[2] = acc[2].add(uppers.get(i));
+            yearMonthCount.merge(year, 1, Integer::sum);
+        }
+        // 剔除首尾不完整预测年（预测起点在当前年中，首末年份均非 12 个月）
+        if (!forecastYearMap.isEmpty()) {
+            int firstYear = forecastYearMap.keySet().iterator().next();
+            int lastYear = new ArrayList<>(forecastYearMap.keySet()).get(forecastYearMap.size() - 1);
+            if (yearMonthCount.getOrDefault(firstYear, 0) < 12) {
+                forecastYearMap.remove(firstYear);
+            }
+            if (forecastYearMap.containsKey(lastYear) && yearMonthCount.getOrDefault(lastYear, 0) < 12) {
+                forecastYearMap.remove(lastYear);
+            }
         }
         vo.setYears(new ArrayList<>());
         vo.setValues(new ArrayList<>());
@@ -127,7 +148,11 @@ public class SimulationServiceImpl implements SimulationService {
     public SimResultVO simulate(SimulateDTO dto) {
         validateParams(dto);
         DataStatusVO status = requireData();
+        // 基准年取最后一个完整年（当年未过完时回退上一年，避免仿真基线失真）
         int baseYear = status.getMaxYear();
+        if (energyMonthMapper.selectMaxMonth(baseYear) < 12 && baseYear > 2021) {
+            baseYear -= 1;
+        }
 
         // 最新年总排放为基准
         List<TrendVO> rows = analysisService.trend(dto.getRegionId(), baseYear, baseYear, null);

@@ -18,6 +18,9 @@ public class FactorEmission {
 
     private Integer energyId;
 
+    /** 电网区域编码（仅电力因子使用）：HB/DB/HD/HZ/XB/NF */
+    private String gridCode;
+
     /** tCO2/单位 */
     private BigDecimal factorValue;
 

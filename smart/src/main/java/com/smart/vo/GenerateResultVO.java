@@ -11,7 +11,7 @@ public class GenerateResultVO {
     /** 生成活动数据条数 */
     private long totalCount;
 
-    /** 扩展的区县数量 */
+    /** 市级区域数量 */
     private int countyCount;
 
     /** 注入的异常记录数（供异常检测演示对照） */

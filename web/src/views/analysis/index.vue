@@ -4,9 +4,7 @@
     <div class="tech-panel filter-bar">
       <div class="filter-item">
         <span class="filter-label">区域</span>
-        <el-select v-model="filters.regionId" style="width: 150px" @change="onRegionChange">
-          <el-option v-for="r in regions" :key="r.id" :label="r.regionName" :value="r.id" />
-        </el-select>
+        <RegionSelect v-model="filters.regionId" :width="150" @change="onRegionChange" />
       </div>
       <div class="filter-item">
         <span class="filter-label">年份</span>
@@ -41,7 +39,7 @@
         <div class="tech-panel">
           <div class="tech-panel-title">
             {{ filters.year }} 年排放结构
-            <el-radio-group v-model="structType" size="small" class="struct-switch" @change="loadStructure">
+            <el-radio-group v-model="structType" size="small" class="struct-switch" @change="onStructTypeChange">
               <el-radio-button value="industry">行业</el-radio-button>
               <el-radio-button value="energy">能源</el-radio-button>
             </el-radio-group>
@@ -63,7 +61,7 @@
       </el-col>
       <el-col :xs="24" :md="12">
         <div class="tech-panel">
-          <div class="tech-panel-title">{{ filters.year }} 年各市排放排行（点击可下钻）</div>
+          <div class="tech-panel-title">{{ filters.year }} 年各市排放排行</div>
           <div ref="rankRef" class="chart-box"></div>
         </div>
       </el-col>
@@ -112,6 +110,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { regionListApi, industryListApi, energyListApi } from '@/api/dict'
+import RegionSelect from '@/components/RegionSelect.vue'
 import { dataStatusApi } from '@/api/data'
 import {
   trendApi, structureApi, energyStructureApi,
@@ -130,7 +129,7 @@ const filters = reactive({ regionId: 1, year: null, industryId: null, energyId: 
 const structType = ref('industry')
 
 const currentRegionName = computed(
-  () => regions.value.find(r => r.id === filters.regionId)?.regionName || '全省'
+  () => regions.value.find(r => r.id === filters.regionId)?.regionName || '全国'
 )
 const industryName = computed(
   () => industries.value.find(i => i.id === filters.industryId)?.industryName || ''
@@ -275,14 +274,6 @@ function renderRanking(rows) {
       }
     }]
   })
-  rankChart.off('click')
-  rankChart.on('click', params => {
-    const target = regions.value.find(r => r.regionName === params.name)
-    if (target) {
-      filters.regionId = target.id
-      onRegionChange()
-    }
-  })
 }
 
 function emptyGraphic(text) {
@@ -295,7 +286,11 @@ const detailTotal = ref(0)
 const detailLoading = ref(false)
 const detailQuery = reactive({ pageNum: 1, pageSize: 10 })
 
-async function loadDetail() {
+// ===== 数据加载与联动 =====
+// seq 防竞态：仅最新一轮筛选的响应可渲染（慢的旧请求不会覆盖新选择的结果）
+let mainSeq = 0
+
+async function loadDetail(seq) {
   detailLoading.value = true
   try {
     const res = await detailPageApi({
@@ -305,45 +300,56 @@ async function loadDetail() {
       industryId: filters.industryId,
       energyId: filters.energyId
     })
-    detailRows.value = res.data.records
-    detailTotal.value = res.data.total
+    if (seq === mainSeq) {
+      detailRows.value = res.data.records
+      detailTotal.value = res.data.total
+    }
   } finally {
-    detailLoading.value = false
+    if (seq === mainSeq) {
+      detailLoading.value = false
+    }
   }
 }
 
-// ===== 数据加载与联动 =====
-async function loadTrend() {
+async function loadTrend(seq) {
   const res = await trendApi({
     regionId: filters.regionId,
     startYear: yearOptions.value[0],
     endYear: yearOptions.value[yearOptions.value.length - 1],
     energyId: filters.energyId
   })
-  renderTrend(res.data)
+  if (seq === mainSeq) {
+    renderTrend(res.data)
+  }
 }
 
-async function loadStructure() {
+async function loadStructure(seq) {
   const params = { regionId: filters.regionId, year: filters.year }
   const res = structType.value === 'industry'
     ? await structureApi(params)
     : await energyStructureApi(params)
-  renderStructure(res.data)
+  if (seq === mainSeq) {
+    renderStructure(res.data)
+  }
 }
 
-async function loadMonthly() {
+async function loadMonthly(seq) {
   const res = await monthlyTrendApi({
     regionId: filters.regionId,
     year: filters.year,
     industryId: filters.industryId,
     energyId: filters.energyId
   })
-  renderMonthly(res.data)
+  if (seq === mainSeq) {
+    renderMonthly(res.data)
+  }
 }
 
-async function loadRanking() {
+async function loadRanking(seq) {
   const res = await regionRankingApi({ year: filters.year })
-  renderRanking(res.data)
+  if (seq === mainSeq) {
+    renderRanking(res.data)
+  }
 }
 
 function onRegionChange() {
@@ -353,26 +359,34 @@ function onRegionChange() {
 }
 
 function onMainChange() {
-  loadTrend()
-  loadStructure()
-  loadMonthly()
-  loadRanking()
+  const seq = ++mainSeq
+  loadTrend(seq)
+  loadStructure(seq)
+  loadMonthly(seq)
+  loadRanking(seq)
   detailQuery.pageNum = 1
-  loadDetail()
+  loadDetail(seq)
 }
 
 function onIndustryChange() {
-  loadMonthly()
+  const seq = ++mainSeq
+  loadMonthly(seq)
   detailQuery.pageNum = 1
-  loadDetail()
+  loadDetail(seq)
+}
+
+function onStructTypeChange() {
+  const seq = ++mainSeq
+  loadStructure(seq)
 }
 
 function onEnergyChange() {
   // 能源筛选联动：年度趋势 + 月度趋势 + 明细表
-  loadTrend()
-  loadMonthly()
+  const seq = ++mainSeq
+  loadTrend(seq)
+  loadMonthly(seq)
   detailQuery.pageNum = 1
-  loadDetail()
+  loadDetail(seq)
 }
 
 function handleResize() {
@@ -386,14 +400,16 @@ onMounted(async () => {
   const [regionRes, industryRes, energyRes, statusRes] = await Promise.all([
     regionListApi(), industryListApi(), energyListApi(), dataStatusApi()
   ])
-  regions.value = regionRes.data.filter(r => r.level !== 3)
+  regions.value = regionRes.data.filter(r => r.level <= 2)
   industries.value = industryRes.data
   energies.value = energyRes.data
 
-  const { minYear, maxYear } = statusRes.data
-  if (minYear && maxYear) {
-    yearOptions.value = Array.from({ length: maxYear - minYear + 1 }, (_, i) => minYear + i)
-    filters.year = Number(route.query.year) && route.query.year <= maxYear ? Number(route.query.year) : maxYear
+  const { minYear, maxYear, maxFullYear } = statusRes.data
+  // 年度分析使用完整年范围（当年未过完不参与）
+  const endYear = maxFullYear || maxYear
+  if (minYear && endYear) {
+    yearOptions.value = Array.from({ length: endYear - minYear + 1 }, (_, i) => minYear + i)
+    filters.year = Number(route.query.year) && route.query.year <= endYear ? Number(route.query.year) : endYear
   } else {
     filters.year = null
   }

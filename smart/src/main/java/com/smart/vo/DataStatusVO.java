@@ -15,6 +15,9 @@ public class DataStatusVO {
     private Integer minYear;
     private Integer maxYear;
 
+    /** 最后一个完整年（当年未过完时 = maxYear - 1），趋势/KPI 等年度分析用 */
+    private Integer maxFullYear;
+
     private long cityCount;
 
     private long countyCount;

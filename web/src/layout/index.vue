@@ -79,6 +79,7 @@ const collapsed = ref(false)
 // 侧栏菜单（与路由 meta 一致，roles 控制可见性）
 const allMenus = [
   { path: '/dashboard', title: '数据总览', icon: 'Odometer' },
+  { path: '/screen', title: '监测大屏', icon: 'Monitor' },
   { path: '/analysis', title: '数据分析', icon: 'TrendCharts' },
   { path: '/simulation', title: '情景仿真', icon: 'MagicStick' },
   { path: '/ai-chat', title: 'AI 碳管家', icon: 'ChatDotRound' },

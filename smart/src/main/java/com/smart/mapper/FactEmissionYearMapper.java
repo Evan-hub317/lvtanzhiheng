@@ -7,6 +7,8 @@ import com.smart.entity.FactEmissionYear;
 import com.smart.vo.DetailVO;
 import com.smart.vo.EnergyStructureVO;
 import com.smart.vo.RegionRankVO;
+
+import java.math.BigDecimal;
 import com.smart.vo.StructureVO;
 import com.smart.vo.TrendVO;
 import org.apache.ibatis.annotations.Delete;
@@ -66,6 +68,18 @@ public interface FactEmissionYearMapper extends BaseMapper<FactEmissionYear> {
             "GROUP BY i.id, i.industry_name ORDER BY i.id")
     List<StructureVO> selectStructureByRegion(@Param("regionId") int regionId, @Param("year") int year);
 
+    /** 全国年度排放总量（tCO2，校准校验用；单位换算由调用方负责） */
+    @Select("SELECT ROUND(SUM(emission), 2) FROM fact_emission_year WHERE year = #{year}")
+    BigDecimal selectNationalTotal(@Param("year") int year);
+
+    /** 各省年度排放排行（tCO2，市级数据归并到省；单位换算由调用方负责） */
+    @Select("SELECT p.id AS regionId, p.region_name AS regionName, ROUND(SUM(y.emission), 2) AS emission " +
+            "FROM fact_emission_year y " +
+            "JOIN dim_region r ON r.id = y.region_id " +
+            "JOIN dim_region p ON p.id = IF(r.level = 2, r.parent_id, r.id) " +
+            "WHERE y.year = #{year} GROUP BY p.id, p.region_name ORDER BY emission DESC")
+    List<RegionRankVO> selectProvinceRanking(@Param("year") int year);
+
     /** 全省（regionId=1）：某年能源结构 */
     @Select("SELECT e.id AS energyId, e.energy_name AS energyName, ROUND(SUM(y.emission), 2) AS emission " +
             "FROM fact_emission_year y JOIN dim_energy e ON y.energy_id = e.id " +
@@ -80,11 +94,10 @@ public interface FactEmissionYearMapper extends BaseMapper<FactEmissionYear> {
             "GROUP BY e.id, e.energy_name ORDER BY e.id")
     List<EnergyStructureVO> selectEnergyStructureByRegion(@Param("regionId") int regionId, @Param("year") int year);
 
-    /** 某年各市排放排行（区县数据归并到所属市，降序） */
+    /** 某年各市排放排行（数据粒度为市级，直接归并，降序） */
     @Select("SELECT c.id AS regionId, c.region_name AS regionName, ROUND(SUM(y.emission), 2) AS emission " +
             "FROM fact_emission_year y " +
-            "JOIN dim_region r ON r.id = y.region_id " +
-            "JOIN dim_region c ON c.id = r.parent_id " +
+            "JOIN dim_region c ON c.id = y.region_id " +
             "WHERE y.year = #{year} AND c.level = 2 " +
             "GROUP BY c.id, c.region_name ORDER BY emission DESC")
     List<RegionRankVO> selectRegionRanking(@Param("year") int year);

@@ -39,6 +39,11 @@ public interface AnalysisService {
     List<RegionRankVO> regionRanking(int year);
 
     /**
+     * 某年各省排放总量（地图热力数据）
+     */
+    List<RegionRankVO> provinceEmissions(int year);
+
+    /**
      * 排放明细分页（区域×行业×能源×年度，可选筛选）
      */
     IPage<DetailVO> detailPage(int pageNum, int pageSize, int regionId,

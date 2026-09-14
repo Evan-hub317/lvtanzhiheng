@@ -10,6 +10,8 @@ export const monthlyTrendApi = params => request.get('/analysis/monthly-trend', 
 
 export const regionRankingApi = params => request.get('/analysis/region-ranking', { params })
 
+export const mapDataApi = params => request.get('/analysis/map', { params })
+
 export const detailPageApi = params => request.get('/analysis/detail', { params })
 
 export const kpiApi = params => request.get('/analysis/kpi', { params })

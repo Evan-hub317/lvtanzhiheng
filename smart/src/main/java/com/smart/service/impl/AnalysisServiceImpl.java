@@ -66,6 +66,11 @@ public class AnalysisServiceImpl implements AnalysisService {
     }
 
     @Override
+    public List<RegionRankVO> provinceEmissions(int year) {
+        return yearMapper.selectProvinceRanking(year);
+    }
+
+    @Override
     public IPage<DetailVO> detailPage(int pageNum, int pageSize, int regionId,
                                       Integer year, Integer industryId, Integer energyId) {
         Page<DetailVO> page = new Page<>(pageNum, pageSize);

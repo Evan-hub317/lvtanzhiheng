@@ -44,9 +44,7 @@
           <el-option label="待确认" :value="0" />
           <el-option label="已确认" :value="1" />
         </el-select>
-        <el-select v-model="query.regionId" placeholder="区域（全省）" clearable style="width: 150px" @change="handleSearch">
-          <el-option v-for="r in regions" :key="r.id" :label="r.regionName" :value="r.id" />
-        </el-select>
+        <RegionSelect v-model="query.regionId" :width="140" @change="handleSearch" />
       </div>
 
       <el-table :data="rows" v-loading="loading" stripe>
@@ -118,7 +116,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { alertScanApi, alertAnomalyApi, alertPageApi, alertHandleApi, alertSummaryApi } from '@/api/alert'
-import { regionListApi } from '@/api/dict'
+import RegionSelect from '@/components/RegionSelect.vue'
 import { useUserStore } from '@/store/user'
 
 const userStore = useUserStore()
@@ -129,7 +127,6 @@ const total = ref(0)
 const loading = ref(false)
 const scanning = ref(false)
 const detecting = ref(false)
-const regions = ref([])
 
 const query = reactive({ pageNum: 1, pageSize: 10, detectType: null, status: null, regionId: null })
 
@@ -190,8 +187,6 @@ async function handleConfirm(row) {
 }
 
 onMounted(async () => {
-  const regionRes = await regionListApi()
-  regions.value = regionRes.data.filter(r => r.level !== 3)
   await Promise.all([loadSummary(), loadData()])
 })
 </script>

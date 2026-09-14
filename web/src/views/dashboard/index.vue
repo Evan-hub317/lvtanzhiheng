@@ -233,7 +233,8 @@ async function loadDashboardData() {
     return
   }
   const startYear = status.value.minYear
-  const endYear = status.value.maxYear
+  // 年度分析一律使用最后一个完整年（当年未过完不参与趋势/KPI）
+  const endYear = status.value.maxFullYear ?? status.value.maxYear
   if (hasEmission.value) {
     const [trendRes, structureRes, kpiRes] = await Promise.all([
       trendApi({ regionId: 1, startYear, endYear }),
@@ -262,7 +263,7 @@ async function handleGenerate() {
   )
   generating.value = true
   try {
-    const res = await generateDataApi({ years: 5, endYear: 2025, injectAnomaly: true })
+    const res = await generateDataApi({ mode: 'all', startYear: 2021, injectAnomaly: true })
     const d = res.data
     ElMessage.success(`生成完成：${d.totalCount} 条 / 区县 ${d.countyCount} 个 / 注入异常 ${d.anomalyCount} 条 / 耗时 ${d.seconds}s`)
     await loadDashboardData()

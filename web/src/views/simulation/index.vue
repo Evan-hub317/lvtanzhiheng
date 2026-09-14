@@ -8,9 +8,7 @@
 
           <div class="ctrl-item">
             <span class="ctrl-label">区域</span>
-            <el-select v-model="regionId" size="small" style="width: 150px" @change="onRegionChange">
-              <el-option v-for="r in regions" :key="r.id" :label="r.regionName" :value="r.id" />
-            </el-select>
+            <RegionSelect v-model="regionId" :width="150" @change="onRegionChange" />
           </div>
 
           <div class="ctrl-item">
@@ -144,13 +142,14 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import { regionListApi } from '@/api/dict'
+import RegionSelect from '@/components/RegionSelect.vue'
 import { dataStatusApi } from '@/api/data'
 import { predictApi, simulateApi, saveScenarioApi, scenarioListApi, scenarioDetailApi } from '@/api/sim'
 
 // ===== 基础数据 =====
 const regions = ref([])
 const regionId = ref(1)
-const regionName = computed(() => regions.value.find(r => r.id === regionId.value)?.regionName || '全省')
+const regionName = computed(() => regions.value.find(r => r.id === regionId.value)?.regionName || '全国')
 
 const presets = [
   { value: 1, label: '基准情景（现趋势延续）', coal: 58, industry: 42, tech: 1.5 },
@@ -419,7 +418,7 @@ const pageLoading = ref(true)
 async function init() {
   try {
     const [regionRes, statusRes] = await Promise.all([regionListApi(), dataStatusApi()])
-    regions.value = regionRes.data.filter(r => r.level !== 3)
+    regions.value = regionRes.data.filter(r => r.level <= 2)
     const { minYear, maxYear } = statusRes.data
     if (!minYear || !maxYear) {
       ElMessage.warning('暂无数据，请先在工作台生成模拟数据并执行核算')

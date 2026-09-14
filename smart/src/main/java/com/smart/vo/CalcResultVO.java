@@ -16,4 +16,7 @@ public class CalcResultVO {
 
     /** 耗时（秒） */
     private long seconds;
+
+    /** 全国数据校准校验报告（文本），全国口径生成时输出 */
+    private String checkReport;
 }

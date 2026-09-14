@@ -3,9 +3,7 @@
     <!-- 生成面板 -->
     <div class="tech-panel gen-bar">
       <span class="gen-label">生成监测报告</span>
-      <el-select v-model="genForm.regionId" size="small" style="width: 140px">
-        <el-option v-for="r in regions" :key="r.id" :label="r.regionName" :value="r.id" />
-      </el-select>
+      <RegionSelect v-model="genForm.regionId" :width="130" />
       <el-radio-group v-model="genForm.periodType" size="small">
         <el-radio-button :value="2">年报</el-radio-button>
         <el-radio-button :value="1">月报</el-radio-button>
@@ -75,7 +73,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import * as echarts from 'echarts'
 import { marked } from 'marked'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { regionListApi } from '@/api/dict'
+import RegionSelect from '@/components/RegionSelect.vue'
 import { dataStatusApi } from '@/api/data'
 import { trendApi, structureApi } from '@/api/analysis'
 import { generateReportApi, reportListApi, reportDetailApi, regenerateReportApi, deleteReportApi } from '@/api/report'
@@ -234,12 +232,13 @@ function handleResize() {
 }
 
 onMounted(async () => {
-  const [regionRes, statusRes] = await Promise.all([regionListApi(), dataStatusApi()])
-  regions.value = regionRes.data.filter(r => r.level !== 3)
-  const { minYear, maxYear } = statusRes.data
-  if (minYear && maxYear) {
-    yearOptions.value = Array.from({ length: maxYear - minYear + 1 }, (_, i) => minYear + i)
-    genForm.year = maxYear
+  const statusRes = await dataStatusApi()
+  const { minYear, maxYear, maxFullYear } = statusRes.data
+  // 报告仅支持完整年（当年未过完不生成年报）
+  const endYear = maxFullYear || maxYear
+  if (minYear && endYear) {
+    yearOptions.value = Array.from({ length: endYear - minYear + 1 }, (_, i) => minYear + i)
+    genForm.year = endYear
   }
   await loadReports()
   window.addEventListener('resize', handleResize)

@@ -69,6 +69,12 @@ public class AnalysisController {
         return Result.ok(analysisService.regionRanking(year));
     }
 
+    @Operation(summary = "全国地图热力数据：各省某年排放总量（大屏数据源）")
+    @GetMapping("/map")
+    public Result<List<RegionRankVO>> map(@RequestParam int year) {
+        return Result.ok(analysisService.provinceEmissions(year));
+    }
+
     @Operation(summary = "排放明细分页（区域×行业×能源×年度）")
     @GetMapping("/detail")
     public Result<IPage<DetailVO>> detail(@RequestParam(defaultValue = "1") int pageNum,
