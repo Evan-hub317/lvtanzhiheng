@@ -26,10 +26,21 @@ public class AlgoClient {
      * @return 响应中的 data 部分（JSONObject）
      */
     public JSONObject post(String path, Object body) {
+        return JSONUtil.parseObj(postRaw(path, body)).getJSONObject("data");
+    }
+
+    /**
+     * POST JSON 调用算法服务，data 为数组时使用
+     */
+    public cn.hutool.json.JSONArray postArray(String path, Object body) {
+        return JSONUtil.parseObj(postRaw(path, body)).getJSONArray("data");
+    }
+
+    private String postRaw(String path, Object body) {
         String url = baseUrl + path;
         String resp;
         try {
-            resp = HttpUtil.post(url, JSONUtil.toJsonStr(body), 60000);
+            resp = HttpUtil.post(url, JSONUtil.toJsonStr(body), 120000);
         } catch (Exception e) {
             log.error("算法服务调用失败: {}", url, e);
             throw new BizException("算法服务不可用，请确认已启动 Python 算法服务（algo 目录：uvicorn main:app --port 8000）");
@@ -39,6 +50,6 @@ public class AlgoClient {
         if (code != 200) {
             throw new BizException(json.getStr("msg", "算法服务返回异常"));
         }
-        return json.getJSONObject("data");
+        return resp;
     }
 }

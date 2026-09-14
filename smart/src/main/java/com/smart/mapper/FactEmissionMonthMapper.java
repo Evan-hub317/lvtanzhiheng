@@ -2,6 +2,7 @@ package com.smart.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.smart.entity.FactEmissionMonth;
+import com.smart.vo.AnomalyPointVO;
 import com.smart.vo.MonthPointVO;
 import com.smart.vo.MonthlyVO;
 import org.apache.ibatis.annotations.Delete;
@@ -99,6 +100,19 @@ public interface FactEmissionMonthMapper extends BaseMapper<FactEmissionMonth> {
             "FROM fact_emission_month WHERE year BETWEEN #{startYear} AND #{endYear} " +
             "GROUP BY year, month ORDER BY year, month")
     List<MonthPointVO> selectMonthlyRangeAll(@Param("startYear") int startYear, @Param("endYear") int endYear);
+
+    /** 全量检测数据点：区县×行业×能源×月（供孤立森林批量检测） */
+    @Select("SELECT region_id AS regionId, industry_id AS industryId, energy_id AS energyId, " +
+            "year, month, ROUND(SUM(emission), 2) AS emission " +
+            "FROM fact_emission_month GROUP BY region_id, industry_id, energy_id, year, month " +
+            "ORDER BY region_id, industry_id, energy_id, year, month")
+    List<AnomalyPointVO> selectAnomalyPoints();
+
+    /** 行业月度排放（阈值环比扫描用） */
+    @Select("SELECT industry_id AS industryId, year, month, ROUND(SUM(emission), 2) AS emission " +
+            "FROM fact_emission_month GROUP BY industry_id, year, month " +
+            "ORDER BY industry_id, year, month")
+    List<AnomalyPointVO> selectIndustryMonthly();
 
     /** 指定市：跨年连续月度排放序列 */
     @Select("SELECT (year - #{startYear}) * 12 + month AS t, ROUND(SUM(emission), 2) AS emission " +

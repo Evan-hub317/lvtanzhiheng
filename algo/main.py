@@ -145,7 +145,7 @@ class SimulateReq(BaseModel):
 
 
 class AnomalyReq(BaseModel):
-    points: list           # [{"month": 1, "value": 123.4}, ...]
+    series: list           # [{"key": "region-industry-energy", "points": [{"year":2021,"month":1,"value":123.4}, ...]}, ...]
 
 
 class EmbedReq(BaseModel):
@@ -155,6 +155,10 @@ class EmbedReq(BaseModel):
 class ChatReq(BaseModel):
     question: str
     history: list = []     # [{"role": "user"/"assistant", "content": "..."}]
+
+
+class ReportReq(BaseModel):
+    summary: dict          # 数据摘要 JSON（区域/时期/指标/结构/预警）
 
 
 # ============================================================
@@ -336,26 +340,33 @@ def simulate(req: SimulateReq):
 # ============================================================
 @app.post("/api/alg/anomaly")
 def anomaly(req: AnomalyReq):
-    if len(req.points) < 10:
-        return {"code": 400, "msg": "数据点不足，至少需要 10 条记录"}
+    """批量孤立森林检测：对每个序列独立建模，返回全部异常点（按分数降序）
+    性能：使用轻量参数（50 棵树），建议调用方按「行业×能源」等共同规律分组，
+    避免上千次独立建模；异常点会附带 points 中的全部原始字段（如 regionId）"""
     from sklearn.ensemble import IsolationForest
     from sklearn.preprocessing import StandardScaler
 
-    X = np.asarray([[p["month"], p["value"]] for p in req.points], dtype=np.float64)
-    Xs = StandardScaler().fit_transform(X)
-    model = IsolationForest(contamination=0.05, random_state=42)
-    pred = model.fit_predict(Xs)
-    raw = model.decision_function(Xs)
-    low, high = raw.min(), raw.max()
-    norm = (high - raw) / (high - low + 1e-9)  # 归一化到 0~1，越接近 1 越异常
-    data = [{
-        "index": i,
-        "month": p["month"],
-        "value": p["value"],
-        "is_anomaly": bool(pred[i] == -1),
-        "score": round(float(norm[i]), 4),
-    } for i, p in enumerate(req.points)]
-    return {"code": 200, "data": data}
+    results = []
+    for s in req.series:
+        pts = s.get("points") or []
+        if len(pts) < 10:
+            continue
+        X = np.asarray([[p["month"], p["value"]] for p in pts], dtype=np.float64)
+        Xs = StandardScaler().fit_transform(X)
+        model = IsolationForest(n_estimators=50, max_samples=64,
+                                contamination=0.05, random_state=42)
+        pred = model.fit_predict(Xs)
+        raw = model.decision_function(Xs)
+        low, high = raw.min(), raw.max()
+        norm = (high - raw) / (high - low + 1e-9)  # 归一化到 0~1，越接近 1 越异常
+        for i, p in enumerate(pts):
+            if pred[i] == -1:
+                results.append({
+                    **p, "key": s.get("key", ""),
+                    "score": round(float(norm[i]), 4),
+                })
+    results.sort(key=lambda r: -r["score"])
+    return {"code": 200, "data": results}
 
 
 # ============================================================
@@ -563,6 +574,46 @@ def _chat_stream(req: ChatReq):
         print("[algo] DeepSeek 调用失败:", e)
         yield _sse({"content": f"（AI 服务调用异常：{type(e).__name__}）{fallback_answer(question)}"})
     yield _sse_done()
+
+
+# ============================================================
+# 6. AIGC 监测报告生成（DeepSeek，非流式）
+# ============================================================
+REPORT_SYSTEM_PROMPT = (
+    "你是'绿碳智衡'区域碳排放监测平台的碳排放分析专家，请根据给定的数据摘要撰写专业监测报告。要求：\n"
+    "1. 使用 Markdown 格式输出（# 一级标题、## 小节标题、- 要点列表）；\n"
+    "2. 章节结构：一、总体情况 二、行业结构分析 三、能源结构分析 四、预警动态 五、结论与建议；\n"
+    "3. 严格基于摘要数据解读分析，不得编造摘要以外的数据或出处；\n"
+    "4. 结论与建议需给出 2-3 条可落地的减排建议；\n"
+    "5. 语言精炼专业，全文 600-900 字，适合呈报政府部门。"
+)
+
+
+@app.post("/api/alg/report")
+def generate_report(req: ReportReq):
+    if not DEEPSEEK_API_KEY:
+        return {"code": 400, "msg": "AI 服务未配置（缺少 DEEPSEEK_API_KEY）"}
+    import httpx
+    summary_text = json.dumps(req.summary, ensure_ascii=False, indent=1)
+    try:
+        with httpx.Client(timeout=120) as client:
+            resp = client.post(
+                f"{DEEPSEEK_BASE_URL}/chat/completions",
+                headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
+                json={"model": "deepseek-chat",
+                      "messages": [
+                          {"role": "system", "content": REPORT_SYSTEM_PROMPT},
+                          {"role": "user", "content": f"【数据摘要】\n{summary_text}"},
+                      ],
+                      "stream": False, "temperature": 0.4},
+            )
+            if resp.status_code != 200:
+                return {"code": 500, "msg": f"AI 调用失败（HTTP {resp.status_code}）"}
+            content = resp.json()["choices"][0]["message"]["content"]
+            return {"code": 200, "data": {"content": content}}
+    except Exception as e:
+        print("[algo] 报告生成失败:", e)
+        return {"code": 500, "msg": f"AI 调用异常: {type(e).__name__}"}
 
 
 # ---------------- 健康检查 ----------------

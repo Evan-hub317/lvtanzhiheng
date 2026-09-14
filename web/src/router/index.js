@@ -33,6 +33,18 @@ const routes = [
         meta: { title: '情景仿真', icon: 'MagicStick' }
       },
       {
+        path: 'alert',
+        name: 'Alert',
+        component: () => import('@/views/alert/index.vue'),
+        meta: { title: '预警中心', icon: 'Bell' }
+      },
+      {
+        path: 'report',
+        name: 'Report',
+        component: () => import('@/views/report/index.vue'),
+        meta: { title: '监测报告', icon: 'Document' }
+      },
+      {
         path: 'ai-chat',
         name: 'AiChat',
         component: () => import('@/views/ai-chat/index.vue'),
