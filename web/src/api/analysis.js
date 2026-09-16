@@ -6,6 +6,8 @@ export const structureApi = params => request.get('/analysis/structure', { param
 
 export const energyStructureApi = params => request.get('/analysis/energy-structure', { params })
 
+export const structureMonthlyApi = params => request.get('/analysis/structure-monthly', { params })
+
 export const monthlyTrendApi = params => request.get('/analysis/monthly-trend', { params })
 
 export const regionRankingApi = params => request.get('/analysis/region-ranking', { params })

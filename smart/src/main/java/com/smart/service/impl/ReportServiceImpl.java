@@ -113,19 +113,28 @@ public class ReportServiceImpl implements ReportService {
      * 构建数据摘要（供提示词与降级模板共用）
      */
     private Map<String, Object> buildSummary(ReportGenerateDTO dto) {
-        DimRegion region = regionMapper.selectById(dto.getRegionId());
-        String regionName = region == null ? "区域" : region.getRegionName();
+        // regionId=1 为全国口径（虚拟ID，无对应区域行）；省/市查区域表取真实名称
+        String regionName;
+        if (dto.getRegionId() == 1) {
+            regionName = "全国";
+        } else {
+            DimRegion region = regionMapper.selectById(dto.getRegionId());
+            regionName = region == null ? "区域" : region.getRegionName();
+        }
 
         Map<String, Object> summary = new HashMap<>();
         String period;
         if (dto.getPeriodType() == 1) {
             period = dto.getYear() + "年" + dto.getMonth() + "月";
             summary.put("title", regionName + " " + period + "碳排放监测月报");
-            // 月报：当月总量 + 环比
+            // 月报：当月总量 + 环比（仅允许已生成数据的月份）
             List<MonthlyVO> monthTotal = analysisService.monthlyTrend(dto.getRegionId(), dto.getYear(), null, null);
             BigDecimal current = monthTotal.stream()
                     .filter(m -> m.getMonth().equals(dto.getMonth()))
                     .map(MonthlyVO::getEmission).findFirst().orElse(BigDecimal.ZERO);
+            if (current.signum() <= 0) {
+                throw new BizException("该月份暂无核算数据，仅能生成已过完月份的报告");
+            }
             summary.put("total_emission_yi", current.divide(BigDecimal.valueOf(1e8), 2, RoundingMode.HALF_UP));
             BigDecimal prev = monthTotal.stream()
                     .filter(m -> m.getMonth() == dto.getMonth() - 1)

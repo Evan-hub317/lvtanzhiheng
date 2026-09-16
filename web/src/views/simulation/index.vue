@@ -8,7 +8,7 @@
 
           <div class="ctrl-item">
             <span class="ctrl-label">区域</span>
-            <RegionSelect v-model="regionId" :width="150" @change="onRegionChange" />
+            <RegionSelect v-model="regionId" :width="118" @change="onRegionChange" />
           </div>
 
           <div class="ctrl-item">
@@ -23,7 +23,7 @@
               <span>煤炭占比</span>
               <b class="slider-val">{{ params.coalRatio.toFixed(1) }}%</b>
             </div>
-            <el-slider v-model="params.coalRatio" :min="10" :max="80" :step="0.5" @change="onParamChange" />
+            <el-slider v-model="params.coalRatio" :min="2" :max="90" :step="0.5" @change="onParamChange" />
           </div>
 
           <div class="slider-item">
@@ -42,14 +42,6 @@
             <el-slider v-model="params.techEfficiency" :min="0" :max="8" :step="0.1" @change="onParamChange" />
           </div>
 
-          <div class="slider-item">
-            <div class="slider-head">
-              <span>GDP 年均增速</span>
-              <b class="slider-val">{{ params.gdpGrowth.toFixed(1) }}%</b>
-            </div>
-            <el-slider v-model="params.gdpGrowth" :min="2" :max="8" :step="0.5" @change="onParamChange" />
-          </div>
-
           <div class="ctrl-actions">
             <el-button type="primary" :loading="simulating" @click="runSimulate">
               立即仿真
@@ -58,8 +50,9 @@
           </div>
 
           <p class="ctrl-tip">
-            调整滑杆后自动重新计算；绿色阴影带为蒙特卡洛 95% 置信区间。
-            达峰年份 = 曲线最高点所在年份。
+            滑杆默认值 = {{ baseParam.regionName }}实际结构（煤炭/工业占比），
+            基准情景即"维持现状"与基线预测一致；调整滑杆产生政策偏离。
+            绿色阴影带为蒙特卡洛 95% 置信区间。
           </p>
         </div>
 
@@ -144,30 +137,41 @@ import { ElMessage } from 'element-plus'
 import { regionListApi } from '@/api/dict'
 import RegionSelect from '@/components/RegionSelect.vue'
 import { dataStatusApi } from '@/api/data'
-import { predictApi, simulateApi, saveScenarioApi, scenarioListApi, scenarioDetailApi } from '@/api/sim'
+import { predictApi, simulateApi, saveScenarioApi, scenarioListApi, scenarioDetailApi, baseParamApi } from '@/api/sim'
 
 // ===== 基础数据 =====
 const regions = ref([])
 const regionId = ref(1)
 const regionName = computed(() => regions.value.find(r => r.id === regionId.value)?.regionName || '全国')
 
+// 预设情景 = 相对所选区域基准参数的偏移（基准参数来自该省实际煤炭/二产占比）
 const presets = [
-  { value: 1, label: '基准情景（现趋势延续）', coal: 58, industry: 42, tech: 1.5 },
-  { value: 2, label: '低碳情景（能源转型）', coal: 48, industry: 36, tech: 2.5 },
-  { value: 3, label: '强化低碳情景（深度减排）', coal: 38, industry: 30, tech: 3.5 },
-  { value: 0, label: '自定义情景', coal: 50, industry: 38, tech: 2.0 }
+  { value: 1, label: '基准情景（维持现状）', coalMul: 1.0, indMul: 1.0, tech: 1.5 },
+  { value: 2, label: '低碳情景（能源转型）', coalMul: 0.8, indMul: 0.85, tech: 3.0 },
+  { value: 3, label: '强化低碳情景（深度减排）', coalMul: 0.65, indMul: 0.7, tech: 4.5 },
+  { value: 0, label: '自定义情景', coalMul: 1.0, indMul: 1.0, tech: 2.0 }
 ]
 const preset = ref(1)
 const params = reactive({ coalRatio: 58, industryRatio: 42, techEfficiency: 1.5, gdpGrowth: 5.0 })
+/** 当前区域的基准参数（滑杆默认值）：煤/工业占比为该省实际值 */
+const baseParam = ref({ regionName: '全国', coalRatio: 58, industryRatio: 42, techEfficiency: 1.5 })
 
 function onPresetChange() {
   const p = presets.find(x => x.value === preset.value)
   if (p) {
-    params.coalRatio = p.coal
-    params.industryRatio = p.industry
+    params.coalRatio = +(baseParam.value.coalRatio * p.coalMul).toFixed(1)
+    params.industryRatio = +(baseParam.value.industryRatio * p.indMul).toFixed(1)
     params.techEfficiency = p.tech
   }
   runSimulate()
+}
+
+async function loadBaseParam() {
+  const res = await baseParamApi(regionId.value)
+  baseParam.value = res.data
+  params.coalRatio = res.data.coalRatio
+  params.industryRatio = res.data.industryRatio
+  params.techEfficiency = 1.5
 }
 
 // ===== 预测与仿真结果 =====
@@ -442,6 +446,7 @@ async function loadPredict() {
 
 async function onRegionChange() {
   checkedScenarios.value = []
+  await loadBaseParam()
   await loadPredict()
   await loadScenarios()
 }

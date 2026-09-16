@@ -28,7 +28,7 @@ public interface AlertRecordMapper extends BaseMapper<AlertRecord> {
             "<if test='regionId != null and regionId != 1'> " +
             "AND (a.region_id = #{regionId} OR a.region_id IN (SELECT id FROM dim_region WHERE parent_id = #{regionId}))" +
             "</if> " +
-            "ORDER BY a.create_time DESC" +
+            "ORDER BY a.anomaly_score IS NULL, a.anomaly_score DESC, a.create_time DESC" +
             "</script>")
     IPage<AlertPageVO> selectAlertPage(Page<AlertPageVO> page,
                                        @Param("detectType") Integer detectType,

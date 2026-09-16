@@ -97,8 +97,8 @@
           :total="detailTotal"
           :page-sizes="[10, 20, 50]"
           layout="total, sizes, prev, pager, next"
-          @size-change="loadDetail"
-          @current-change="loadDetail"
+          @size-change="onDetailPageChange"
+          @current-change="onDetailPageChange"
         />
       </div>
     </div>
@@ -153,15 +153,17 @@ function renderTrend(rows) {
   }
   trendChart.setOption({
     graphic: null,
-    tooltip: { trigger: 'axis', valueFormatter: v => (v / 10000).toFixed(1) + ' 万吨' },
-    grid: { left: 60, right: 24, top: 30, bottom: 36 },
+    tooltip: { trigger: 'axis', valueFormatter: v => (v / 1e8).toFixed(2) + ' 亿吨' },
+    grid: { left: 84, right: 24, top: 30, bottom: 36 },
     xAxis: {
       type: 'category', data: rows.map(r => r.year), boundaryGap: false,
       axisLine: { lineStyle: { color: '#c4d0dd' } }, axisLabel: { color: '#51606e' }
     },
     yAxis: {
-      type: 'value', name: '万吨 CO₂',
-      nameTextStyle: { color: '#51606e' }, axisLabel: { color: '#51606e', formatter: v => (v / 10000).toFixed(1) },
+      type: 'value', name: '亿吨 CO₂',
+      nameTextStyle: { color: '#51606e', padding: [0, 0, 0, 4] },
+      nameGap: 12,
+      axisLabel: { color: '#51606e', formatter: v => (v / 1e8).toFixed(1) },
       splitLine: { lineStyle: { color: '#eef2f7' } }
     },
     series: [{
@@ -378,6 +380,11 @@ function onIndustryChange() {
 function onStructTypeChange() {
   const seq = ++mainSeq
   loadStructure(seq)
+}
+
+function onDetailPageChange() {
+  const seq = ++mainSeq
+  loadDetail(seq)
 }
 
 function onEnergyChange() {

@@ -8,10 +8,14 @@ import com.smart.client.AlgoClient;
 import com.smart.common.BizException;
 import com.smart.dto.SaveScenarioDTO;
 import com.smart.dto.SimulateDTO;
+import com.smart.entity.DimRegion;
+import com.smart.entity.ProvinceParam;
 import com.smart.entity.ScenarioRecord;
 import com.smart.entity.SimResult;
+import com.smart.mapper.DimRegionMapper;
 import com.smart.mapper.FactEmissionMonthMapper;
 import com.smart.mapper.FactEnergyMonthMapper;
+import com.smart.mapper.ProvinceParamMapper;
 import com.smart.mapper.ScenarioRecordMapper;
 import com.smart.mapper.SimResultMapper;
 import com.smart.service.AnalysisService;
@@ -55,6 +59,8 @@ public class SimulationServiceImpl implements SimulationService {
     private final ScenarioRecordMapper scenarioMapper;
     private final SimResultMapper simResultMapper;
     private final AnalysisService analysisService;
+    private final DimRegionMapper regionMapper;
+    private final ProvinceParamMapper paramMapper;
 
     @Override
     public PredictVO predict(int regionId) {
@@ -164,9 +170,21 @@ public class SimulationServiceImpl implements SimulationService {
         Map<String, Object> req = new HashMap<>();
         req.put("base_year", baseYear);
         req.put("base_emission", baseEmission.doubleValue());
+        // 历史年度序列：仿真模型据此校准基准增速（基准情景与历史趋势一致）
+        req.put("history", analysisService.trend(dto.getRegionId(), status.getMinYear(), baseYear, null).stream()
+                .map(t -> {
+                    Map<String, Object> item = new HashMap<>();
+                    item.put("year", t.getYear());
+                    item.put("emission", t.getEmission());
+                    return item;
+                }).collect(Collectors.toList()));
         req.put("coal_ratio", dto.getCoalRatio());
         req.put("industry_ratio", dto.getIndustryRatio());
         req.put("tech_efficiency", dto.getTechEfficiency());
+        // 省级化修正基准：基准参数 = 该省实际煤炭/二产占比（情景参数 = 基准时无修正）
+        Map<String, Object> base = baseParam(dto.getRegionId());
+        req.put("base_coal", base.get("coalRatio"));
+        req.put("base_ind", base.get("industryRatio"));
         req.put("gdp_growth", dto.getGdpGrowth());
         req.put("years", dto.getYears());
         req.put("mc_iters", dto.getMcIters());
@@ -181,6 +199,27 @@ public class SimulationServiceImpl implements SimulationService {
         vo.setUpper(data.getJSONArray("upper").toList(BigDecimal.class));
         detectPeak(vo.getYears(), vo.getValues(), vo);
         return vo;
+    }
+
+    @Override
+    public Map<String, Object> baseParam(int regionId) {
+        Map<String, Object> result = new HashMap<>();
+        if (regionId == PROVINCE_REGION_ID) {
+            result.put("regionName", "全国");
+            result.put("coalRatio", 58.0);
+            result.put("industryRatio", 42.0);
+            result.put("techEfficiency", 1.5);
+            return result;
+        }
+        DimRegion region = regionMapper.selectById(regionId);
+        int provinceId = (region != null && region.getLevel() == 2) ? region.getParentId() : regionId;
+        DimRegion province = regionMapper.selectById(provinceId);
+        ProvinceParam param = paramMapper.selectById(provinceId);
+        result.put("regionName", province == null ? "区域" : province.getRegionName());
+        result.put("coalRatio", param == null ? 58.0 : param.getCoalRatio().doubleValue());
+        result.put("industryRatio", param == null ? 42.0 : param.getSecondaryRatio().doubleValue());
+        result.put("techEfficiency", 1.5);
+        return result;
     }
 
     @Override

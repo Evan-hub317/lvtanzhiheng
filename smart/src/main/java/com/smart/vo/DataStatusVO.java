@@ -18,6 +18,9 @@ public class DataStatusVO {
     /** 最后一个完整年（当年未过完时 = maxYear - 1），趋势/KPI 等年度分析用 */
     private Integer maxFullYear;
 
+    /** 数据最晚年已生成的最大月份（判断当前年可生成月报的月份上限） */
+    private Integer maxMonth;
+
     private long cityCount;
 
     private long countyCount;

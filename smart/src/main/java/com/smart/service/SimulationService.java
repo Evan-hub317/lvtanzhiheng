@@ -7,6 +7,7 @@ import com.smart.vo.ScenarioVO;
 import com.smart.vo.SimResultVO;
 
 import java.util.List;
+import java.util.Map;
 
 public interface SimulationService {
 
@@ -20,6 +21,12 @@ public interface SimulationService {
      * 情景仿真：调整能源结构/产业结构/能效参数，重算未来排放轨迹
      */
     SimResultVO simulate(SimulateDTO dto);
+
+    /**
+     * 区域仿真基准参数（滑杆默认值）：
+     * 全国=58/42；省=该省实际煤炭/二产占比；市=所属省参数
+     */
+    Map<String, Object> baseParam(int regionId);
 
     /**
      * 保存情景（后端重算轨迹落库）

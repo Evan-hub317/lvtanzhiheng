@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 预测与情景仿真接口（核心亮点模块）
@@ -47,6 +48,12 @@ public class SimulationController {
     @PostMapping("/simulate")
     public Result<SimResultVO> simulate(@RequestBody SimulateDTO dto) {
         return Result.ok(simulationService.simulate(dto));
+    }
+
+    @Operation(summary = "区域仿真基准参数（滑杆默认值：该省实际煤炭/二产占比）")
+    @GetMapping("/param/{regionId}")
+    public Result<Map<String, Object>> baseParam(@PathVariable int regionId) {
+        return Result.ok(simulationService.baseParam(regionId));
     }
 
     @Operation(summary = "保存情景")

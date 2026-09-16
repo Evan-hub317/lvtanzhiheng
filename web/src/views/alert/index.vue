@@ -23,8 +23,10 @@
       <el-col :xs="24" :md="6">
         <div class="tech-panel action-panel">
           <template v-if="userStore.isAdmin">
-            <el-button type="warning" :loading="scanning" @click="handleScan">执行阈值扫描</el-button>
-            <el-button type="primary" :loading="detecting" @click="handleAnomaly">AI 异常检测</el-button>
+            <div class="action-btns">
+              <el-button type="warning" :loading="scanning" @click="handleScan">执行阈值扫描</el-button>
+              <el-button type="primary" :loading="detecting" @click="handleAnomaly">AI 异常检测</el-button>
+            </div>
           </template>
           <p class="action-tip">阈值扫描每天 02:00 自动执行；AI 检测对全量数据建模（约 10~30 秒）</p>
         </div>
@@ -202,7 +204,11 @@ onMounted(async () => {
   padding: 20px;
   border-radius: 12px;
   color: #fff;
-  min-height: 96px;
+  /* 固定等高：与右侧操作卡严格对齐 */
+  height: 128px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .stat-value {
   font-size: 30px;
@@ -216,11 +222,21 @@ onMounted(async () => {
 }
 
 .action-panel {
-  min-height: 96px;
+  height: 128px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: 10px;
+}
+.action-btns {
+  display: flex;
+  gap: 10px;
+}
+/* 两个按钮等宽自适应，随卡片宽度伸缩，不贴边溢出 */
+.action-btns .el-button {
+  flex: 1;
+  min-width: 0;
+  margin-left: 0;
 }
 .action-tip {
   margin: 0;

@@ -136,11 +136,14 @@ class PredictReq(BaseModel):
 class SimulateReq(BaseModel):
     base_year: int
     base_emission: float
-    coal_ratio: float          # 煤炭占能源消费比重 %
-    industry_ratio: float      # 工业占 GDP 比重 %
-    tech_efficiency: float     # 单位能耗年均下降率 %
-    gdp_growth: float = 5.0
-    years: int = 10
+    history: list = []         # [{"year": 2020, "emission": 123.4}, ...] 历史年度总量（增速校准用）
+    coal_ratio: float          # 煤炭占能源消费比重 %（政策情景值）
+    industry_ratio: float      # 工业占 GDP 比重 %（政策情景值）
+    tech_efficiency: float     # 单位能耗年均下降率 %（1.5 为历史隐含水平）
+    base_coal: float = 58.0    # 基准煤炭占比（默认全国均值；省级化时传该省实际值）
+    base_ind: float = 42.0     # 基准工业占比（同上）
+    gdp_growth: float = 5.0    # 无历史数据时的回退估算参数
+    years: int = 6
     mc_iters: int = 300        # 蒙特卡洛抽样次数
 
 
@@ -165,27 +168,32 @@ class ReportReq(BaseModel):
 # 1. 趋势预测（LSTM + 蒙特卡洛置信区间）
 # ============================================================
 def _lstm_forecast(values, n_future):
-    """LSTM 单步滚动预测；数据过短或 torch 不可用时抛异常由调用方降级"""
+    """LSTM 直接多步预测：输入最近 seq_len 个月，一次前向输出未来 n_future 个月。
+    与自回归滚动外推相比无误差累积，长程输出稳定；数据过短或 torch 不可用时抛异常由调用方降级。"""
     import torch
     import torch.nn as nn
 
     v = np.asarray(values, dtype=np.float32)
-    seq_len = min(6, len(v) - 1)
-    X, y = [], []
-    for i in range(len(v) - seq_len):
-        X.append(v[i:i + seq_len])
-        y.append(v[i + seq_len])
-    if len(X) < 6:
+    seq_len = min(12, len(v) - n_future)
+    if len(v) < seq_len + n_future + 6:
         raise ValueError("训练样本不足")
 
-    Xt = torch.tensor(X, dtype=torch.float32).unsqueeze(-1)
-    yt = torch.tensor(y, dtype=torch.float32).unsqueeze(-1)
+    # 训练样本：过去 seq_len 个月 → 未来 n_future 个月（有监督，无需滚动）
+    X, y = [], []
+    for i in range(len(v) - seq_len - n_future + 1):
+        X.append(v[i:i + seq_len])
+        y.append(v[i + seq_len:i + seq_len + n_future])
+    mean = float(np.mean(v))
+    std = float(np.std(v)) + 1e-6
+    Xt = torch.tensor(np.asarray(X), dtype=torch.float32).unsqueeze(-1)
+    Xt = (Xt - mean) / std
+    yt = (torch.tensor(np.asarray(y), dtype=torch.float32) - mean) / std
 
     class LSTM(nn.Module):
         def __init__(self, hidden=32):
             super().__init__()
             self.lstm = nn.LSTM(1, hidden, batch_first=True)
-            self.fc = nn.Linear(hidden, 1)
+            self.fc = nn.Linear(hidden, n_future)
 
         def forward(self, x):
             out, _ = self.lstm(x)
@@ -195,21 +203,17 @@ def _lstm_forecast(values, n_future):
     model = LSTM()
     opt = torch.optim.Adam(model.parameters(), lr=0.01)
     loss_fn = nn.MSELoss()
-    for _ in range(200):
+    for _ in range(300):
         opt.zero_grad()
         loss = loss_fn(model(Xt), yt)
         loss.backward()
         opt.step()
 
     model.eval()
-    seq = torch.tensor(v[-seq_len:], dtype=torch.float32).view(1, seq_len, 1)
-    preds = []
     with torch.no_grad():
-        for _ in range(n_future):
-            p = model(seq)[0, 0].item()
-            preds.append(p)
-            seq = torch.cat([seq[:, 1:, :], torch.tensor([[[p]]], dtype=torch.float32)], dim=1)
-    return np.asarray(preds, dtype=np.float64)
+        last = torch.tensor((v[-seq_len:] - mean) / std, dtype=torch.float32).view(1, seq_len, 1)
+        pred = model(last)[0].numpy()
+    return pred * std + mean
 
 
 def _linear_forecast(values, n_future):
@@ -252,13 +256,21 @@ def predict(req: PredictReq):
     n = max(1, req.future_steps)
 
     method = "lstm"
+    LSTM_STEPS = 24  # LSTM 仅做短期预测；长程外推由趋势模型衔接（自回归滚动长程会误差累积衰减）
     try:
-        fc = _lstm_forecast(values, n)
-        # 退化检测：负值、零值尾段或末值偏离历史均值过大 → 弃用
+        fc_lstm = _lstm_forecast(values, min(n, LSTM_STEPS))
         hist_mean = float(np.mean(values))
-        if fc is None or np.any(fc < 0) or fc[-1] < hist_mean * 0.05 or fc[-1] > hist_mean * 3:
-            print("[algo] LSTM 输出退化，降级季节趋势模型")
-            fc, method = _trend_season_forecast(values, n), "trend"
+        # 退化检测：负值、零值尾段或末值偏离历史均值过大 → 弃用
+        if (fc_lstm is None or np.any(fc_lstm < 0)
+                or fc_lstm[-1] < hist_mean * 0.05 or fc_lstm[-1] > hist_mean * 3):
+            raise ValueError("LSTM 输出退化")
+        if n > LSTM_STEPS:
+            # 混合预测：LSTM 前 24 步 + 趋势模型月度增量从 LSTM 末值平滑衔接
+            fc_trend = _trend_season_forecast(values, n)
+            tail = fc_lstm[-1] + np.cumsum(np.diff(fc_trend[LSTM_STEPS - 1:]))
+            fc = np.concatenate([fc_lstm, tail])
+        else:
+            fc = fc_lstm
     except Exception as e:
         print("[algo] LSTM 不可用，降级季节趋势模型:", e)
         fc, method = _trend_season_forecast(values, n), "trend"
@@ -291,16 +303,39 @@ def predict(req: PredictReq):
 
 
 # ============================================================
-# 2. 情景仿真（Kaya 式分解模型 + 蒙特卡洛）
-#   排放增速 = (1 + GDP增速 - 能耗强度下降率) × 能源结构效应 × 产业结构效应
+# 2. 情景仿真（历史增速校准 + 政策修正模型 + 蒙特卡洛）
+#   基准增速从历史年度数据校准（近 3 年几何平均）；
+#   政策参数（煤炭占比/工业占比/能效下降率）作为相对基准的修正项，
+#   基准情景（58/42/1.5）下曲线与历史趋势外推一致，调整参数才产生偏离。
 # ============================================================
-def _trajectory(base_emission, years, coal, ind, tech, gdp):
-    cei = 1.0 - (BASE_COAL - coal) / 100.0 * 0.8        # 能源结构效应
-    ind_effect = (1.0 - ind / 100.0) / (1.0 - BASE_IND / 100.0)  # 产业结构效应
-    growth = max((1.0 + (gdp - tech) / 100.0) * cei * ind_effect, 0.9)
+BASE_TECH = 1.5  # 历史隐含的单位能耗年均下降率（%）
+
+
+def _calibrate_growth(history, fallback_gdp):
+    """历史增速校准：近 3 年几何平均年增速；数据不足回退参数估算"""
+    vals = sorted([float(h["emission"]) for h in history])
+    if len(vals) >= 4 and vals[-4] > 0:
+        return (vals[-1] / vals[-4]) ** (1.0 / 3.0) - 1.0
+    if len(vals) >= 2 and vals[0] > 0:
+        return (vals[-1] / vals[0]) ** (1.0 / (len(vals) - 1)) - 1.0
+    return (fallback_gdp - BASE_TECH) / 100.0
+
+
+def _trajectory(base_emission, years, hist_growth, coal, ind, tech, base_coal, base_ind):
+    """历史增速校准 + 政策修正（修正基准可省级化）：
+    - 结构性调整（煤炭/工业占比）→ 排放水平的一次性修正，按 3 年渐进生效（幂弹性 0.5）
+    - 能效下降率 → 对增速的持续性修正（弹性 2.0，1.5 为历史隐含水平）
+    - 情景参数 = 基准参数（各省实际值）时所有修正为 1，曲线即该省历史趋势外推"""
+    coal_level = (coal / base_coal) ** 0.5 if coal > 0 and base_coal > 0 else 0.0
+    ind_level = (ind / base_ind) ** 0.5 if ind > 0 and base_ind > 0 else 0.0
+    level_effect = coal_level * ind_level          # 一次性结构水平修正（基准=1）
+    tech_effect = 1.0 - (tech - BASE_TECH) / 100.0 * 2.0   # 持续性能效修正（基准=1）
+    growth = max((1.0 + hist_growth) * tech_effect, 0.90)
     out, e = [], base_emission
-    for _ in years:
-        e *= growth
+    for i, _ in enumerate(years):
+        # 结构修正分 3 年渐进生效（避免"当年骤变"，达峰年份更自然）
+        adj = level_effect ** (1.0 / 3.0) if i < 3 else 1.0
+        e *= growth * adj
         out.append(e)
     return np.asarray(out)
 
@@ -311,15 +346,19 @@ def simulate(req: SimulateReq):
     mc = min(max(req.mc_iters, 100), 1000)
     rng = np.random.default_rng(42)
 
-    central = _trajectory(req.base_emission, years,
-                          req.coal_ratio, req.industry_ratio, req.tech_efficiency, req.gdp_growth)
+    hist_growth = _calibrate_growth(req.history or [], req.gdp_growth)
+
+    central = _trajectory(req.base_emission, years, hist_growth,
+                          req.coal_ratio, req.industry_ratio, req.tech_efficiency,
+                          req.base_coal, req.base_ind)
     paths = np.zeros((mc, len(years)))
     for i in range(mc):
         coal = min(max(rng.normal(req.coal_ratio, 0.5), 10.0), 90.0)
         ind = min(max(rng.normal(req.industry_ratio, 0.4), 10.0), 60.0)
         tech = max(rng.normal(req.tech_efficiency, 0.4), 0.0)
-        gdp = rng.normal(req.gdp_growth, 0.8)
-        paths[i] = _trajectory(req.base_emission, years, coal, ind, tech, gdp)
+        growth = max(rng.normal(hist_growth, 0.01), 0.0)   # 增速不确定度 ±1%
+        paths[i] = _trajectory(req.base_emission, years, growth, coal, ind, tech,
+                               req.base_coal, req.base_ind)
 
     lower = np.percentile(paths, 2.5, axis=0)
     upper = np.percentile(paths, 97.5, axis=0)
@@ -342,7 +381,9 @@ def simulate(req: SimulateReq):
 def anomaly(req: AnomalyReq):
     """批量孤立森林检测：对每个序列独立建模，返回全部异常点（按分数降序）
     性能：使用轻量参数（50 棵树），建议调用方按「行业×能源」等共同规律分组，
-    避免上千次独立建模；异常点会附带 points 中的全部原始字段（如 regionId）"""
+    避免上千次独立建模；异常点会附带 points 中的全部原始字段（如 regionId）。
+    分数：所有检出点【全局】min-max 归一化（0~1，越接近 1 越异常）——
+    全局最高分唯一，各组间可比，避免"每组第一名恒为 1.0"的失真。"""
     from sklearn.ensemble import IsolationForest
     from sklearn.preprocessing import StandardScaler
 
@@ -356,15 +397,21 @@ def anomaly(req: AnomalyReq):
         model = IsolationForest(n_estimators=50, max_samples=64,
                                 contamination=0.05, random_state=42)
         pred = model.fit_predict(Xs)
-        raw = model.decision_function(Xs)
-        low, high = raw.min(), raw.max()
-        norm = (high - raw) / (high - low + 1e-9)  # 归一化到 0~1，越接近 1 越异常
+        raw = model.decision_function(Xs)  # 越负越异常
         for i, p in enumerate(pts):
             if pred[i] == -1:
                 results.append({
                     **p, "key": s.get("key", ""),
-                    "score": round(float(norm[i]), 4),
+                    "raw": float(raw[i]),   # 原始异常度，稍后全局归一
                 })
+    # 全局归一化：所有检出点统一映射到 0~1（唯一最高分）
+    if results:
+        raws = [r["raw"] for r in results]
+        lo, hi = min(raws), max(raws)
+        span = (hi - lo) if hi > lo else 1e-9
+        for r in results:
+            r["score"] = round((hi - r["raw"]) / span, 4)
+            r.pop("raw", None)
     results.sort(key=lambda r: -r["score"])
     return {"code": 200, "data": results}
 

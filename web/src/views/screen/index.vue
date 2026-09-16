@@ -128,7 +128,7 @@ async function loadScreenData() {
     renderMap(mapRes.data)
     renderTrend(trendRes.data)
     renderRank(rankRes.data)
-    renderPie(energyRes.data, pieRef.value, pieChart, 'pieChart')
+    renderPie(energyRes.data)
   } finally {
     loading.value = false
   }
@@ -237,11 +237,17 @@ function renderRank(rows) {
   })
 }
 
-function renderPie(rows, domRef, chartRefKey, key) {
-  if (chartRefKey === 'pieChart') {
-    pieChart = pieChart || echarts.init(domRef)
-    pieChart.setOption(buildPieOption(rows))
+function renderPie(rows) {
+  pieChart = pieChart || echarts.init(pieRef.value)
+  if (!rows?.length) {
+    pieChart.setOption({ graphic: emptyScreenGraphic('暂无数据') }, true)
+    return
   }
+  pieChart.setOption(buildPieOption(rows))
+}
+
+function emptyScreenGraphic(text) {
+  return { type: 'text', left: 'center', top: 'middle', style: { text, fill: '#7ea6c8', fontSize: 13 } }
 }
 
 function buildPieOption(rows) {

@@ -147,8 +147,8 @@ function renderTrendChart(rows) {
   }
   trendChart.setOption({
     graphic: null,
-    tooltip: { trigger: 'axis' },
-    grid: { left: 60, right: 24, top: 30, bottom: 36 },
+    tooltip: { trigger: 'axis', valueFormatter: v => (v / 1e8).toFixed(2) + ' 亿吨' },
+    grid: { left: 84, right: 24, top: 30, bottom: 36 },
     xAxis: {
       type: 'category',
       data: rows.map(r => r.year),
@@ -158,9 +158,10 @@ function renderTrendChart(rows) {
     },
     yAxis: {
       type: 'value',
-      name: '万吨 CO₂',
-      nameTextStyle: { color: '#51606e' },
-      axisLabel: { color: '#51606e', formatter: v => (v / 10000).toFixed(1) + ' 万' },
+      name: '亿吨 CO₂',
+      nameTextStyle: { color: '#51606e', padding: [0, 0, 0, 4] },
+      nameGap: 12,
+      axisLabel: { color: '#51606e', formatter: v => (v / 1e8).toFixed(1) },
       splitLine: { lineStyle: { color: '#eef2f7' } }
     },
     series: [

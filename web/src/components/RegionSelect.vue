@@ -72,6 +72,7 @@ onMounted(async () => {
 <style scoped>
 .region-select {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 </style>

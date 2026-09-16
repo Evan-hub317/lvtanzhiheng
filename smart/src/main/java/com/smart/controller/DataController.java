@@ -64,7 +64,8 @@ public class DataController {
         vo.setEmissionCount(emissionYearMapper.selectCount(null));
         // 最后一个完整年：当年未过完（数据月 < 12）时回退上一年
         int fullYear = vo.getMaxYear() == null ? 0 : vo.getMaxYear();
-        if (fullYear > 0 && energyMonthMapper.selectMaxMonth(fullYear) < 12) {
+        vo.setMaxMonth(fullYear > 0 ? energyMonthMapper.selectMaxMonth(fullYear) : 0);
+        if (fullYear > 0 && vo.getMaxMonth() < 12) {
             fullYear -= 1;
         }
         vo.setMaxFullYear(fullYear);

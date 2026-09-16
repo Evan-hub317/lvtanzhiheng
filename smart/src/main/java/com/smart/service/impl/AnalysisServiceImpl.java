@@ -1,5 +1,6 @@
 package com.smart.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.smart.entity.DimRegion;
@@ -54,6 +55,13 @@ public class AnalysisServiceImpl implements AnalysisService {
     }
 
     @Override
+    public List<StructureVO> structureMonthly(int regionId, int year, int month) {
+        return regionId == PROVINCE_REGION_ID
+                ? monthMapper.selectStructureMonthlyAll(year, month)
+                : monthMapper.selectStructureMonthlyByRegion(regionId, year, month);
+    }
+
+    @Override
     public List<MonthlyVO> monthlyTrend(int regionId, int year, Integer industryId, Integer energyId) {
         return regionId == PROVINCE_REGION_ID
                 ? monthMapper.selectMonthlyAll(year, industryId, energyId)
@@ -95,10 +103,23 @@ public class AnalysisServiceImpl implements AnalysisService {
                     .divide(prevRows.get(0).getEmission(), 2, RoundingMode.HALF_UP);
         }
         // 碳强度：tCO2 / 万元GDP（GDP 亿元 × 10000）
+        // 全国口径（regionId=1）：GDP 取全部省级 GDP 之和；省/市口径取对应省级 GDP
         BigDecimal intensity = null;
-        DimRegion region = regionMapper.selectById(regionId);
-        if (region != null && region.getGdp() != null && region.getGdp().signum() > 0) {
-            intensity = total.divide(region.getGdp().multiply(BigDecimal.valueOf(10000)), 6, RoundingMode.HALF_UP);
+        BigDecimal gdpYi = null;
+        if (regionId == PROVINCE_REGION_ID) {
+            gdpYi = regionMapper.selectList(new LambdaQueryWrapper<DimRegion>().eq(DimRegion::getLevel, 1))
+                    .stream().map(DimRegion::getGdp).filter(java.util.Objects::nonNull)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+        } else {
+            DimRegion region = regionMapper.selectById(regionId);
+            int provinceId = (region != null && region.getLevel() == 2) ? region.getParentId() : regionId;
+            DimRegion province = regionMapper.selectById(provinceId);
+            if (province != null) {
+                gdpYi = province.getGdp();
+            }
+        }
+        if (gdpYi != null && gdpYi.signum() > 0) {
+            intensity = total.divide(gdpYi.multiply(BigDecimal.valueOf(10000)), 6, RoundingMode.HALF_UP);
         }
         KpiVO vo = new KpiVO();
         vo.setYear(year);

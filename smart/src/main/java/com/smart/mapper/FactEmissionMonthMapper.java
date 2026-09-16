@@ -5,6 +5,7 @@ import com.smart.entity.FactEmissionMonth;
 import com.smart.vo.AnomalyPointVO;
 import com.smart.vo.MonthPointVO;
 import com.smart.vo.MonthlyVO;
+import com.smart.vo.StructureVO;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Param;
@@ -117,6 +118,23 @@ public interface FactEmissionMonthMapper extends BaseMapper<FactEmissionMonth> {
             "FROM fact_emission_month WHERE year BETWEEN #{startYear} AND #{endYear} " +
             "GROUP BY year, month ORDER BY year, month")
     List<MonthPointVO> selectMonthlyRangeAll(@Param("startYear") int startYear, @Param("endYear") int endYear);
+
+    /** 全省：某月行业排放结构（月报附图用） */
+    @Select("SELECT i.id AS industryId, i.industry_name AS industryName, ROUND(SUM(m.emission), 2) AS emission " +
+            "FROM fact_emission_month m JOIN dim_industry i ON m.industry_id = i.id " +
+            "WHERE m.year = #{year} AND m.month = #{month} " +
+            "GROUP BY i.id, i.industry_name ORDER BY i.id")
+    List<StructureVO> selectStructureMonthlyAll(@Param("year") int year, @Param("month") int month);
+
+    /** 指定区域：某月行业排放结构 */
+    @Select("SELECT i.id AS industryId, i.industry_name AS industryName, ROUND(SUM(m.emission), 2) AS emission " +
+            "FROM fact_emission_month m JOIN dim_industry i ON m.industry_id = i.id " +
+            "WHERE m.year = #{year} AND m.month = #{month} AND m.region_id IN " +
+            "(SELECT id FROM dim_region WHERE id = #{regionId} OR parent_id = #{regionId}) " +
+            "GROUP BY i.id, i.industry_name ORDER BY i.id")
+    List<StructureVO> selectStructureMonthlyByRegion(@Param("regionId") int regionId,
+                                                     @Param("year") int year,
+                                                     @Param("month") int month);
 
     /** 全量检测数据点：区县×行业×能源×月（供孤立森林批量检测） */
     @Select("SELECT region_id AS regionId, industry_id AS industryId, energy_id AS energyId, " +

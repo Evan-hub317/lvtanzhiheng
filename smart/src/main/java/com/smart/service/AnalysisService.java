@@ -29,6 +29,11 @@ public interface AnalysisService {
     List<EnergyStructureVO> energyStructure(int regionId, int year);
 
     /**
+     * 某月行业排放结构（月报附图用）
+     */
+    List<StructureVO> structureMonthly(int regionId, int year, int month);
+
+    /**
      * 某年月度排放趋势（可选行业/能源筛选）
      */
     List<MonthlyVO> monthlyTrend(int regionId, int year, Integer industryId, Integer energyId);

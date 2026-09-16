@@ -54,6 +54,14 @@ public class AnalysisController {
         return Result.ok(analysisService.energyStructure(regionId, year));
     }
 
+    @Operation(summary = "某月行业排放结构（月报附图用）")
+    @GetMapping("/structure-monthly")
+    public Result<List<StructureVO>> structureMonthly(@RequestParam(defaultValue = "1") int regionId,
+                                                      @RequestParam int year,
+                                                      @RequestParam int month) {
+        return Result.ok(analysisService.structureMonthly(regionId, year, month));
+    }
+
     @Operation(summary = "某年月度排放趋势（可选行业/能源筛选）")
     @GetMapping("/monthly-trend")
     public Result<List<MonthlyVO>> monthlyTrend(@RequestParam(defaultValue = "1") int regionId,
