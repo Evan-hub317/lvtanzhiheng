@@ -207,7 +207,8 @@ async function runSimulate() {
 // ===== 情景管理 =====
 const scenarios = ref([])
 const checkedScenarios = ref([])
-const scenarioCache = new Map()
+// 响应式 Map：勾选后异步写入轨迹时触发对比表等 computed 重新计算
+const scenarioCache = reactive(new Map())
 const saving = ref(false)
 
 async function loadScenarios() {
@@ -239,11 +240,12 @@ async function onCheckedChange(ids) {
 }
 
 const compareRows = computed(() => {
+  // 对比表 = 当前参数 + 已勾选情景（勾选即纳入对比，轨迹取自勾选时拉取的缓存）
   const rows = []
   if (simResult.value) {
     const v = simResult.value.values
     rows.push({
-      name: `当前参数（${presets.find(p => p.value === preset.value)?.label || '自定义'}）`,
+      name: '当前参数',
       coalRatio: params.coalRatio.toFixed(1),
       industryRatio: params.industryRatio.toFixed(1),
       techEfficiency: params.techEfficiency.toFixed(1),
@@ -252,7 +254,9 @@ const compareRows = computed(() => {
       endValue: v[v.length - 1]
     })
   }
-  for (const s of scenarios.value) {
+  for (const id of checkedScenarios.value) {
+    const s = scenarioCache.get(id)
+    if (!s?.values?.length) continue
     rows.push({
       name: s.scenarioName,
       coalRatio: s.coalRatio,
@@ -260,10 +264,10 @@ const compareRows = computed(() => {
       techEfficiency: s.techEfficiency,
       peakYear: s.peakYear,
       peakValue: s.peakEmission,
-      endValue: s.values ? s.values[s.values.length - 1] : null
+      endValue: s.values[s.values.length - 1]
     })
   }
-  return rows.filter(r => r.endValue != null)
+  return rows
 })
 
 // ===== 图表 =====
@@ -340,14 +344,19 @@ function renderChart() {
     legend.push('当前仿真')
   }
 
-  // 已勾选情景叠加
+  // 已勾选情景叠加（拼接历史末点与基线预测一致，拼接点由 tooltip formatter 过滤）
   for (const id of checkedScenarios.value) {
     const s = scenarioCache.get(id)
     if (!s?.values?.length) continue
+    const bridge = lastHistY != null && lastHistV != null
+      ? { value: [lastHistY, lastHistV], isBridge: true, symbol: 'none' }
+      : null
     series.push({
       name: s.scenarioName, type: 'line', smooth: true, symbol: 'none',
-      data: s.years.map((y, i) => [y, s.values[i]]),
-      lineStyle: { width: 2, type: 'dashed', color: SCENARIO_COLORS[(id - 1) % SCENARIO_COLORS.length] }
+      data: bridge
+        ? [bridge, ...s.years.map((y, i) => [y, s.values[i]])]
+        : s.years.map((y, i) => [y, s.values[i]]),
+      lineStyle: { width: 2, type: 'solid', color: SCENARIO_COLORS[(id - 1) % SCENARIO_COLORS.length] }
     })
     legend.push(s.scenarioName)
   }
@@ -396,7 +405,16 @@ function renderChart() {
         return html
       }
     },
-    legend: { top: 6, data: legend, textStyle: { color: '#51606e', fontSize: 12 } },
+    legend: {
+      top: 6,
+      left: 'center',
+      width: '72%',
+      type: 'scroll',
+      data: legend,
+      textStyle: { color: '#51606e', fontSize: 12 },
+      pageIconSize: 10,
+      pageTextStyle: { color: '#51606e' }
+    },
     grid: { left: 70, right: 30, top: 46, bottom: 40 },
     xAxis: {
       type: 'value',
@@ -413,7 +431,7 @@ function renderChart() {
       splitLine: { lineStyle: { color: '#eef2f7' } }
     },
     series
-  })
+  }, true)  // notMerge：全量替换 series，避免取消勾选后旧叠加曲线残留
 }
 
 // ===== 初始化 =====

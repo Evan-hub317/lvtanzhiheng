@@ -89,18 +89,22 @@ public class SimulationServiceImpl implements SimulationService {
         // 3. 月度结果聚合为年度
         PredictVO vo = new PredictVO();
         vo.setMethod(data.getStr("method"));
-        // 历史年度（t → 年）；剔除最后一个不完整年（当前年尚未过完，避免年度曲线失真）
+        // 历史年度（t → 年）：仅保留完整年；最后一个不完整年（当年 1~8 月）的已知月值
+        // 稍后并入预测首年，合成完整年度值（已知月 + 预测月）
         Map<Integer, BigDecimal> histYearMap = new TreeMap<>();
         for (MonthPointVO m : months) {
             int year = startYear + (m.getT() - 1) / 12;
             histYearMap.merge(year, m.getEmission(), BigDecimal::add);
         }
+        BigDecimal lastYearKnownSum = null;
+        int lastKnownYear = 0;
         if (!histYearMap.isEmpty()) {
             int lastYear = histYearMap.keySet().stream().max(Integer::compareTo).orElse(startYear);
             long lastYearMonths = months.stream()
                     .filter(m -> startYear + (m.getT() - 1) / 12 == lastYear).count();
             if (lastYearMonths < 12) {
-                histYearMap.remove(lastYear);
+                lastYearKnownSum = histYearMap.remove(lastYear);
+                lastKnownYear = lastYear;
             }
         }
         vo.setHistoryYears(new ArrayList<>(histYearMap.keySet()));
@@ -123,14 +127,18 @@ public class SimulationServiceImpl implements SimulationService {
             acc[2] = acc[2].add(uppers.get(i));
             yearMonthCount.merge(year, 1, Integer::sum);
         }
-        // 剔除首尾不完整预测年（预测起点在当前年中，首末年份均非 12 个月）
+        // 首年补全：历史最后不完整年的已知月值并入预测首年（合成完整年，预测曲线连续）
+        // 已知月无不确定度，中心线与置信区间上下界同样并入，避免区间带在首年塌陷
+        if (lastYearKnownSum != null && forecastYearMap.containsKey(lastKnownYear)) {
+            BigDecimal[] acc = forecastYearMap.get(lastKnownYear);
+            acc[0] = acc[0].add(lastYearKnownSum);
+            acc[1] = acc[1].add(lastYearKnownSum);
+            acc[2] = acc[2].add(lastYearKnownSum);
+        }
+        // 仅剔除末尾不完整预测年（预测末段不足 12 个月）
         if (!forecastYearMap.isEmpty()) {
-            int firstYear = forecastYearMap.keySet().iterator().next();
             int lastYear = new ArrayList<>(forecastYearMap.keySet()).get(forecastYearMap.size() - 1);
-            if (yearMonthCount.getOrDefault(firstYear, 0) < 12) {
-                forecastYearMap.remove(firstYear);
-            }
-            if (forecastYearMap.containsKey(lastYear) && yearMonthCount.getOrDefault(lastYear, 0) < 12) {
+            if (yearMonthCount.getOrDefault(lastYear, 0) < 12) {
                 forecastYearMap.remove(lastYear);
             }
         }
@@ -260,7 +268,32 @@ public class SimulationServiceImpl implements SimulationService {
                 new LambdaQueryWrapper<ScenarioRecord>()
                         .eq(ScenarioRecord::getRegionId, regionId)
                         .orderByDesc(ScenarioRecord::getCreateTime));
-        return records.stream().map(this::toVO).collect(Collectors.toList());
+        List<ScenarioVO> vos = records.stream().map(this::toVO).collect(Collectors.toList());
+        // 无达峰信息的情景（如预设种子）：按参数重算一次并回写，保证列表"达峰/未达峰"标签正确
+        for (ScenarioRecord record : records) {
+            if (record.getPeakYear() == null && record.getCoalRatio() != null) {
+                try {
+                    SimulateDTO sim = new SimulateDTO();
+                    sim.setRegionId(record.getRegionId());
+                    sim.setCoalRatio(record.getCoalRatio().doubleValue());
+                    sim.setIndustryRatio(record.getIndustryRatio() == null ? 42.0 : record.getIndustryRatio().doubleValue());
+                    sim.setTechEfficiency(record.getTechEfficiency() == null ? 1.5 : record.getTechEfficiency().doubleValue());
+                    sim.setYears(6);
+                    SimResultVO result = simulate(sim);
+                    record.setPeakYear(result.getPeakYear());
+                    record.setPeakEmission(result.getPeakValue());
+                    scenarioMapper.updateById(record);
+                    vos.stream().filter(v -> v.getId().equals(record.getId())).findFirst()
+                            .ifPresent(v -> {
+                                v.setPeakYear(result.getPeakYear());
+                                v.setPeakEmission(result.getPeakValue());
+                            });
+                } catch (Exception e) {
+                    log.warn("情景达峰信息回算失败（id={}）: {}", record.getId(), e.getMessage());
+                }
+            }
+        }
+        return vos;
     }
 
     @Override
@@ -274,6 +307,27 @@ public class SimulationServiceImpl implements SimulationService {
                         .eq(SimResult::getScenarioId, id)
                         .orderByAsc(SimResult::getYear));
         ScenarioVO vo = toVO(record);
+        if (rows.isEmpty()) {
+            // 无落库轨迹（如预设情景种子）：按保存参数实时重算，保证勾选叠加可用
+            try {
+                SimulateDTO sim = new SimulateDTO();
+                sim.setRegionId(record.getRegionId());
+                sim.setCoalRatio(record.getCoalRatio() == null ? 58.0 : record.getCoalRatio().doubleValue());
+                sim.setIndustryRatio(record.getIndustryRatio() == null ? 42.0 : record.getIndustryRatio().doubleValue());
+                sim.setTechEfficiency(record.getTechEfficiency() == null ? 1.5 : record.getTechEfficiency().doubleValue());
+                sim.setYears(6);
+                SimResultVO result = simulate(sim);
+                vo.setYears(result.getYears());
+                vo.setValues(result.getValues());
+                vo.setLower(result.getLower());
+                vo.setUpper(result.getUpper());
+                vo.setPeakYear(result.getPeakYear());
+                vo.setPeakEmission(result.getPeakValue());
+                return vo;
+            } catch (Exception e) {
+                log.warn("情景轨迹重算失败（id={}）: {}", id, e.getMessage());
+            }
+        }
         vo.setYears(new ArrayList<>());
         vo.setValues(new ArrayList<>());
         vo.setLower(new ArrayList<>());
