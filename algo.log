@@ -1,0 +1,53 @@
+INFO:     Started server process [23568]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:60018 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60061 - "POST /api/alg/predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60175 - "POST /api/alg/predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60175 - "POST /api/alg/predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60269 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49672 - "POST /api/alg/predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49672 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49672 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49672 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63453 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63453 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63453 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63453 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63453 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63453 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55503 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55503 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55503 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55503 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50323 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63967 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64150 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64150 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64150 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64150 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54413 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54413 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:54413 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60654 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60654 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60654 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60654 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62491 - "POST /api/alg/predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62491 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62491 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62491 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62491 - "POST /api/alg/predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:62491 - "POST /api/alg/simulate HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55662 - "POST /api/alg/predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55662 - "POST /api/alg/predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63591 - "POST /api/alg/predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63662 - "POST /api/alg/predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64084 - "POST /api/alg/predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60148 - "POST /api/alg/predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:64871 - "POST /api/alg/predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58207 - "POST /api/alg/predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58207 - "POST /api/alg/predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53872 - "POST /api/alg/predict HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53872 - "POST /api/alg/predict HTTP/1.1" 200 OK

@@ -72,6 +72,36 @@ public interface FactEmissionYearMapper extends BaseMapper<FactEmissionYear> {
     @Select("SELECT ROUND(SUM(emission), 2) FROM fact_emission_year WHERE year = #{year}")
     BigDecimal selectNationalTotal(@Param("year") int year);
 
+    /** 某省下辖各市年度排放排行（降序） */
+    @Select("SELECT c.id AS regionId, c.region_name AS regionName, ROUND(SUM(y.emission), 2) AS emission " +
+            "FROM fact_emission_year y " +
+            "JOIN dim_region c ON c.id = y.region_id " +
+            "WHERE y.year = #{year} AND c.level = 2 AND c.parent_id = #{provinceId} " +
+            "GROUP BY c.id, c.region_name ORDER BY emission DESC")
+    List<RegionRankVO> selectCityRankingByProvince(@Param("provinceId") int provinceId, @Param("year") int year);
+
+    /** 全国：某行业年度排放趋势 */
+    @Select("<script>" +
+            "SELECT year, ROUND(SUM(emission), 2) AS emission FROM fact_emission_year " +
+            "WHERE year BETWEEN #{startYear} AND #{endYear} AND industry_id = #{industryId} " +
+            "GROUP BY year ORDER BY year" +
+            "</script>")
+    List<TrendVO> selectTrendAllByIndustry(@Param("startYear") int startYear,
+                                           @Param("endYear") int endYear,
+                                           @Param("industryId") int industryId);
+
+    /** 指定区域：某行业年度排放趋势 */
+    @Select("<script>" +
+            "SELECT year, ROUND(SUM(emission), 2) AS emission FROM fact_emission_year " +
+            "WHERE region_id IN (SELECT id FROM dim_region WHERE id = #{regionId} OR parent_id = #{regionId}) " +
+            "AND year BETWEEN #{startYear} AND #{endYear} AND industry_id = #{industryId} " +
+            "GROUP BY year ORDER BY year" +
+            "</script>")
+    List<TrendVO> selectTrendByRegionIndustry(@Param("regionId") int regionId,
+                                              @Param("startYear") int startYear,
+                                              @Param("endYear") int endYear,
+                                              @Param("industryId") int industryId);
+
     /** 各省年度排放排行（tCO2，市级数据归并到省；单位换算由调用方负责） */
     @Select("SELECT p.id AS regionId, p.region_name AS regionName, ROUND(SUM(y.emission), 2) AS emission " +
             "FROM fact_emission_year y " +

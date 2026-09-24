@@ -380,7 +380,7 @@ INSERT IGNORE INTO factor_emission (id, energy_id, factor_value, oxid_rate, data
 -- 预警规则（示例；年度上限按演示省 7.1 万亿 GDP 校准，年排放约 5.5 亿吨）
 INSERT IGNORE INTO alert_rule (id, rule_name, rule_type, dimension, dimension_id, threshold_value, status) VALUES
 (1, '行业月度排放环比增幅超限', 1, 'industry', NULL, 20.0000, 1),
-(2, '区域年度排放总量超上限',   3, 'region',   1,    600000000.0000, 1);
+(2, '区域年度排放总量超上限',   3, 'region',   1,    13000000000.0000, 1);
 
 -- 预设情景（基准/低碳/强化低碳，参数可在仿真器中调整；1.5 为历史隐含能效下降率）
 INSERT IGNORE INTO scenario_record (id, scenario_name, region_id, preset_type, coal_ratio, industry_ratio, tech_efficiency) VALUES

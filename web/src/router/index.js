@@ -57,6 +57,12 @@ const routes = [
         meta: { title: 'AI 碳管家', icon: 'ChatDotRound' }
       },
       {
+        path: 'agent',
+        name: 'Agent',
+        component: () => import('@/views/agent/index.vue'),
+        meta: { title: 'AI 分析助手', icon: 'Cpu' }
+      },
+      {
         path: 'system/user',
         name: 'UserManage',
         component: () => import('@/views/system/user/index.vue'),

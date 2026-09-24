@@ -69,6 +69,18 @@ public class AnalysisServiceImpl implements AnalysisService {
     }
 
     @Override
+    public List<RegionRankVO> cityRankingByProvince(int provinceId, int year) {
+        return yearMapper.selectCityRankingByProvince(provinceId, year);
+    }
+
+    @Override
+    public List<TrendVO> industryTrend(int regionId, int startYear, int endYear, int industryId) {
+        return regionId == PROVINCE_REGION_ID
+                ? yearMapper.selectTrendAllByIndustry(startYear, endYear, industryId)
+                : yearMapper.selectTrendByRegionIndustry(regionId, startYear, endYear, industryId);
+    }
+
+    @Override
     public List<RegionRankVO> regionRanking(int year) {
         return yearMapper.selectRegionRanking(year);
     }

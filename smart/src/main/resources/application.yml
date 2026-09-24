@@ -44,6 +44,11 @@ sa-token:
 algo:
   base-url: http://localhost:8000
 
+# DeepSeek 大模型（AI 分析助手 Function Calling；Key 从系统环境变量读取）
+deepseek:
+  base-url: https://api.deepseek.com
+  api-key: ${DEEPSEEK_API_KEY:}
+
 # 应用配置
 app:
   # 知识库文档存储目录

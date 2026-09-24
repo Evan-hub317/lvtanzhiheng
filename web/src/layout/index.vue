@@ -83,6 +83,7 @@ const allMenus = [
   { path: '/analysis', title: '数据分析', icon: 'TrendCharts' },
   { path: '/simulation', title: '情景仿真', icon: 'MagicStick' },
   { path: '/ai-chat', title: 'AI 碳管家', icon: 'ChatDotRound' },
+  { path: '/agent', title: 'AI 分析助手', icon: 'Cpu' },
   { path: '/alert', title: '预警中心', icon: 'Bell' },
   { path: '/report', title: '监测报告', icon: 'Document' },
   { path: '/system/user', title: '用户管理', icon: 'User', roles: ['ADMIN'] },
