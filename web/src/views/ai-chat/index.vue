@@ -87,7 +87,11 @@
 
         <div v-for="(m, i) in messages" :key="i" class="msg-row" :class="m.role">
           <div class="msg-bubble">
-            <div class="msg-content">{{ m.content }}<span v-if="streaming && i === messages.length - 1" class="cursor">▌</span></div>
+            <div class="msg-content">
+              <div v-if="m.role === 'assistant'" class="md-body" v-html="renderMd(m.content)"></div>
+              <template v-else>{{ m.content }}</template>
+              <span v-if="streaming && i === messages.length - 1" class="cursor">▌</span>
+            </div>
             <div v-if="m.sources && m.sources.length" class="msg-sources">
               <el-tag v-for="(s, si) in m.sources" :key="si" size="small" type="info" effect="plain" class="source-tag">
                 📄 {{ s.doc_name }} 分块{{ s.chunk_index }}
@@ -128,6 +132,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { sessionListApi, messageListApi, saveMessageApi, deleteSessionApi } from '@/api/chat'
 import { kbListApi, kbUploadApi, kbUpdateStatusApi, kbDeleteApi } from '@/api/kb'
 import { renderAsync } from 'docx-preview'
+import { marked } from 'marked'
 
 const sideTab = ref('sessions')
 const sessions = ref([])
@@ -140,6 +145,11 @@ const uploading = ref(false)
 const msgBox = ref()
 
 const quickQuestions = ['碳达峰和碳中和有什么区别？', '碳排放核算用什么方法？', '我国碳达峰目标年份是？']
+
+// AI 回答为 Markdown 文本，转 HTML 渲染（加粗/列表/标题等）
+function renderMd(content) {
+  return content ? marked.parse(content) : ''
+}
 
 // ===== 会话 =====
 async function loadSessions() {
@@ -543,6 +553,44 @@ onBeforeUnmount(() => {
 .cursor {
   animation: blink 1s step-start infinite;
   color: #0ea5e9;
+}
+
+/* Markdown 渲染样式（与 AI 分析助手一致） */
+.md-body :deep(p) {
+  margin: 4px 0;
+}
+.md-body :deep(h1),
+.md-body :deep(h2),
+.md-body :deep(h3) {
+  font-size: 15px;
+  margin: 10px 0 6px;
+  color: #0b84bb;
+}
+.md-body :deep(ul),
+.md-body :deep(ol) {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.md-body :deep(li) {
+  margin: 2px 0;
+}
+.md-body :deep(strong) {
+  color: #0b84bb;
+}
+.md-body :deep(hr) {
+  border: none;
+  border-top: 1px solid #d5e6f3;
+  margin: 10px 0;
+}
+.md-body :deep(table) {
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+.md-body :deep(th),
+.md-body :deep(td) {
+  border: 1px solid #cfe3f0;
+  padding: 4px 10px;
+  font-size: 13px;
 }
 @keyframes blink {
   50% {

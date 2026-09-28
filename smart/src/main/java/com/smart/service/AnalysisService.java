@@ -54,6 +54,11 @@ public interface AnalysisService {
     List<TrendVO> industryTrend(int regionId, int startYear, int endYear, int industryId);
 
     /**
+     * 某年电力/热力间接排放（展示口径）
+     */
+    List<EnergyStructureVO> indirect(int year);
+
+    /**
      * 某年各省排放总量（地图热力数据）
      */
     List<RegionRankVO> provinceEmissions(int year);

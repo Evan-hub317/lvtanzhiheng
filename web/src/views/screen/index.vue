@@ -46,8 +46,10 @@
       <div class="side-panel">
         <div class="panel-title">省份排放 TOP10</div>
         <div ref="rankRef" class="rank-chart"></div>
-        <div class="panel-title sub">能源结构（{{ fullYear }} 年）</div>
+        <div class="panel-title sub">能源结构（{{ fullYear }} 年，直接排放）</div>
         <div ref="pieRef" class="structure-chart"></div>
+        <div class="panel-title sub">间接排放（{{ fullYear }} 年，电力/热力）</div>
+        <div ref="indirectRef" class="indirect-chart"></div>
       </div>
     </div>
 
@@ -81,7 +83,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import * as echarts from 'echarts'
 import { dataStatusApi } from '@/api/data'
-import { mapDataApi, trendApi, structureApi, energyStructureApi, kpiApi } from '@/api/analysis'
+import { mapDataApi, trendApi, structureApi, energyStructureApi, indirectApi, kpiApi } from '@/api/analysis'
 import { regionListApi } from '@/api/dict'
 import chinaJson from '@/assets/china.json'
 
@@ -98,7 +100,8 @@ const mapRef = ref()
 const trendRef = ref()
 const rankRef = ref()
 const pieRef = ref()
-let mapChart, trendChart, rankChart, pieChart
+const indirectRef = ref()
+let mapChart, trendChart, rankChart, pieChart, indirectChart
 
 // ===== 时钟 =====
 function tickClock() {
@@ -113,12 +116,13 @@ async function loadScreenData() {
     fullYear.value = status.maxFullYear ?? status.maxYear ?? 2025
     cityCount.value = status.cityCount ?? 0
 
-    const [mapRes, trendRes, rankRes, structRes, energyRes, kpiRes] = await Promise.all([
+    const [mapRes, trendRes, rankRes, structRes, energyRes, indirectRes, kpiRes] = await Promise.all([
       mapDataApi({ year: fullYear.value }),
       trendApi({ regionId: 1, startYear: (status.minYear ?? 2021), endYear: fullYear.value }),
       mapDataApi({ year: fullYear.value }),
       structureApi({ regionId: 1, year: fullYear.value }),
       energyStructureApi({ regionId: 1, year: fullYear.value }),
+      indirectApi({ year: fullYear.value }),
       kpiApi({ regionId: 1, year: fullYear.value })
     ])
     nationalTotal.value = (mapRes.data.reduce((s, p) => s + Number(p.emission), 0) / 1e8).toFixed(2)
@@ -129,6 +133,7 @@ async function loadScreenData() {
     renderTrend(trendRes.data)
     renderRank(rankRes.data)
     renderPie(energyRes.data)
+    renderIndirect(indirectRes.data)
   } finally {
     loading.value = false
   }
@@ -250,10 +255,30 @@ function emptyScreenGraphic(text) {
   return { type: 'text', left: 'center', top: 'middle', style: { text, fill: '#7ea6c8', fontSize: 13 } }
 }
 
+function renderIndirect(rows) {
+  indirectChart = echarts.getInstanceByDom(indirectRef.value) || echarts.init(indirectRef.value)
+  if (!rows?.length) {
+    indirectChart.setOption({ graphic: emptyScreenGraphic('暂无数据') }, true)
+    return
+  }
+  indirectChart.setOption({
+    tooltip: { trigger: 'item', formatter: '{b}：{c} 亿吨（{d}%）' },
+    legend: { bottom: 0, type: 'scroll', icon: 'circle', textStyle: { color: '#7ea6c8', fontSize: 10 } },
+    color: ['#fbbf24', '#f87171'],
+    series: [{
+      type: 'pie', radius: ['40%', '62%'], center: ['50%', '44%'],
+      label: { color: '#c9e2f5', fontSize: 10, formatter: '{b}\n{d}%' },
+      itemStyle: { borderColor: '#0a1428', borderWidth: 1 },
+      data: rows.map(r => ({ name: r.energyName, value: Number((r.emission / 1e8).toFixed(2)) }))
+    }]
+  })
+  indirectChart.resize()
+}
+
 function buildPieOption(rows) {
   return {
     tooltip: { trigger: 'item', formatter: '{b}：{c} 亿吨（{d}%）' },
-    legend: { bottom: 0, icon: 'circle', textStyle: { color: '#7ea6c8', fontSize: 10 } },
+    legend: { bottom: 0, type: 'scroll', icon: 'circle', textStyle: { color: '#7ea6c8', fontSize: 10 } },
     color: ['#22d3ee', '#4ade80', '#fbbf24', '#a78bfa', '#f87171', '#f472b6', '#94a3b8', '#34d399'],
     series: [{
       type: 'pie', radius: ['40%', '62%'], center: ['50%', '44%'],
@@ -348,6 +373,7 @@ function handleResize() {
   trendChart?.resize()
   rankChart?.resize()
   pieChart?.resize()
+  indirectChart?.resize()
   provinceTrendChart?.resize()
   provincePieChart?.resize()
 }
@@ -368,6 +394,7 @@ onBeforeUnmount(() => {
   trendChart?.dispose()
   rankChart?.dispose()
   pieChart?.dispose()
+  indirectChart?.dispose()
   provinceTrendChart?.dispose()
   provincePieChart?.dispose()
 })
@@ -483,8 +510,16 @@ onBeforeUnmount(() => {
   min-height: 200px;
 }
 .structure-chart {
-  flex: 1;
-  min-height: 180px;
+  height: 230px;
+  flex-shrink: 0;
+}
+.indirect-chart {
+  height: 210px;
+  flex-shrink: 0;
+}
+/* 高度不足时面板内部滚动，避免图表互相挤压重叠 */
+.side-panel {
+  overflow-y: auto;
 }
 
 .map-panel {

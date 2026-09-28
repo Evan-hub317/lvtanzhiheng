@@ -165,9 +165,17 @@ public class ReportServiceImpl implements ReportService {
             return item;
         }).collect(Collectors.toList()));
 
-        // 能源结构
+        // 能源结构（化石燃料直接排放口径）
         List<EnergyStructureVO> energies = analysisService.energyStructure(dto.getRegionId(), dto.getYear());
         summary.put("energies", energies.stream().map(s -> {
+            Map<String, Object> item = new HashMap<>();
+            item.put("name", s.getEnergyName());
+            item.put("emission_yi", s.getEmission().divide(BigDecimal.valueOf(1e8), 2, RoundingMode.HALF_UP));
+            return item;
+        }).collect(Collectors.toList()));
+        // 间接排放（电力/热力，展示口径）
+        List<EnergyStructureVO> indirect = analysisService.indirect(dto.getYear());
+        summary.put("indirect", indirect.stream().map(s -> {
             Map<String, Object> item = new HashMap<>();
             item.put("name", s.getEnergyName());
             item.put("emission_yi", s.getEmission().divide(BigDecimal.valueOf(1e8), 2, RoundingMode.HALF_UP));

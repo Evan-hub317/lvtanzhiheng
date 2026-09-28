@@ -456,7 +456,16 @@ public class AgentServiceImpl implements AgentService {
                 int regionId = resolveRegionId(args.get("region"));
                 int year = intArg(args, "year", latestFullYear());
                 List<EnergyStructureVO> rows = analysisService.energyStructure(regionId, year);
-                return energyResult(rows, year + " 年能源结构");
+                Map<String, Object> r = energyResult(rows, year + " 年能源结构（化石燃料直接排放）");
+                // 附注间接排放（电力/热力，展示口径，不计入总量）
+                List<EnergyStructureVO> indirect = analysisService.indirect(year);
+                if (indirect != null && !indirect.isEmpty()) {
+                    String indDesc = indirect.stream()
+                            .map(v -> v.getEnergyName() + " " + v.getEmission().divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP) + " 亿吨")
+                            .collect(java.util.stream.Collectors.joining("，"));
+                    r.put("summary", r.get("summary") + "；间接排放（不计入总量）：" + indDesc);
+                }
+                return r;
             }
             case "query_region_ranking" -> {
                 int year = intArg(args, "year", latestFullYear());

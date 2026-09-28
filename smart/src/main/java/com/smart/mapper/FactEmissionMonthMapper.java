@@ -91,6 +91,7 @@ public interface FactEmissionMonthMapper extends BaseMapper<FactEmissionMonth> {
     @Select("<script>" +
             "SELECT month, ROUND(SUM(emission), 2) AS emission FROM fact_emission_month " +
             "WHERE year = #{year} " +
+            "<if test='energyId == null'> AND energy_id &lt;= 6</if>" +
             "<if test='industryId != null'> AND industry_id = #{industryId}</if> " +
             "<if test='energyId != null'> AND energy_id = #{energyId}</if> " +
             "GROUP BY month ORDER BY month" +
@@ -104,6 +105,7 @@ public interface FactEmissionMonthMapper extends BaseMapper<FactEmissionMonth> {
             "SELECT month, ROUND(SUM(emission), 2) AS emission FROM fact_emission_month " +
             "WHERE year = #{year} AND region_id IN " +
             "(SELECT id FROM dim_region WHERE id = #{regionId} OR parent_id = #{regionId}) " +
+            "<if test='energyId == null'> AND energy_id &lt;= 6</if>" +
             "<if test='industryId != null'> AND industry_id = #{industryId}</if> " +
             "<if test='energyId != null'> AND energy_id = #{energyId}</if> " +
             "GROUP BY month ORDER BY month" +
@@ -115,14 +117,14 @@ public interface FactEmissionMonthMapper extends BaseMapper<FactEmissionMonth> {
 
     /** 全省：跨年连续月度排放序列（t 为连续月份序号，供 LSTM 预测） */
     @Select("SELECT (year - #{startYear}) * 12 + month AS t, ROUND(SUM(emission), 2) AS emission " +
-            "FROM fact_emission_month WHERE year BETWEEN #{startYear} AND #{endYear} " +
+            "FROM fact_emission_month WHERE year BETWEEN #{startYear} AND #{endYear} AND energy_id <= 6 " +
             "GROUP BY year, month ORDER BY year, month")
     List<MonthPointVO> selectMonthlyRangeAll(@Param("startYear") int startYear, @Param("endYear") int endYear);
 
     /** 全省：某月行业排放结构（月报附图用） */
     @Select("SELECT i.id AS industryId, i.industry_name AS industryName, ROUND(SUM(m.emission), 2) AS emission " +
             "FROM fact_emission_month m JOIN dim_industry i ON m.industry_id = i.id " +
-            "WHERE m.year = #{year} AND m.month = #{month} " +
+            "WHERE m.year = #{year} AND m.month = #{month} AND m.energy_id <= 6 " +
             "GROUP BY i.id, i.industry_name ORDER BY i.id")
     List<StructureVO> selectStructureMonthlyAll(@Param("year") int year, @Param("month") int month);
 
@@ -131,7 +133,7 @@ public interface FactEmissionMonthMapper extends BaseMapper<FactEmissionMonth> {
             "FROM fact_emission_month m JOIN dim_industry i ON m.industry_id = i.id " +
             "WHERE m.year = #{year} AND m.month = #{month} AND m.region_id IN " +
             "(SELECT id FROM dim_region WHERE id = #{regionId} OR parent_id = #{regionId}) " +
-            "GROUP BY i.id, i.industry_name ORDER BY i.id")
+            "AND m.energy_id <= 6 GROUP BY i.id, i.industry_name ORDER BY i.id")
     List<StructureVO> selectStructureMonthlyByRegion(@Param("regionId") int regionId,
                                                      @Param("year") int year,
                                                      @Param("month") int month);
@@ -153,7 +155,7 @@ public interface FactEmissionMonthMapper extends BaseMapper<FactEmissionMonth> {
     @Select("SELECT (year - #{startYear}) * 12 + month AS t, ROUND(SUM(emission), 2) AS emission " +
             "FROM fact_emission_month WHERE year BETWEEN #{startYear} AND #{endYear} " +
             "AND region_id IN (SELECT id FROM dim_region WHERE id = #{regionId} OR parent_id = #{regionId}) " +
-            "GROUP BY year, month ORDER BY year, month")
+            "AND energy_id <= 6 GROUP BY year, month ORDER BY year, month")
     List<MonthPointVO> selectMonthlyRangeByRegion(@Param("regionId") int regionId,
                                                   @Param("startYear") int startYear,
                                                   @Param("endYear") int endYear);

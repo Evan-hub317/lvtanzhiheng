@@ -2,7 +2,7 @@
   <div class="agent-page">
     <el-row :gutter="16">
       <!-- 最左：历史会话 -->
-      <el-col :xs="24" :md="4">
+      <el-col :xs="24" :md="6">
         <div class="tech-panel sessions-panel">
           <div class="tech-panel-title">历史会话</div>
           <div v-for="s in sessions" :key="s.id" class="session-item" :class="{ active: s.id === currentSessionId }" @click="loadSession(s)">
@@ -19,7 +19,7 @@
       </el-col>
 
       <!-- 中间：对话 -->
-      <el-col :xs="24" :md="panelCollapsed ? 19 : 11">
+      <el-col :xs="24" :md="panelCollapsed ? 17 : 11">
         <div class="tech-panel chat-panel">
           <div class="chat-header">
             <span class="tech-panel-title">💬 对话式分析</span>
@@ -62,7 +62,7 @@
       </el-col>
 
       <!-- 右侧：执行链路（整栏可向右收起） -->
-      <el-col :xs="24" :md="panelCollapsed ? 1 : 9">
+      <el-col :xs="24" :md="panelCollapsed ? 1 : 7">
         <div class="tech-panel steps-panel" :class="{ collapsed: panelCollapsed }">
           <div class="steps-header">
             <template v-if="!panelCollapsed">
@@ -78,14 +78,16 @@
             <el-empty v-if="!currentSteps.length" description="点击回答气泡上的「查看执行链路」" :image-size="80" />
             <div v-for="(s, i) in currentSteps" :key="i" class="step-item" :class="{ expanded: s.expanded }">
               <div class="step-head" @click="toggleStep(s)">
-                <span class="step-index">{{ i + 1 }}</span>
-                <span class="step-icon" :class="s.status">
-                  {{ stepIcon(s) }}
-                </span>
-                <span class="step-name">{{ stepMeta(s).label }}</span>
+                <div class="step-head-main">
+                  <span class="step-index">{{ i + 1 }}</span>
+                  <span class="step-icon" :class="s.status">
+                    {{ stepIcon(s) }}
+                  </span>
+                  <span class="step-name">{{ stepMeta(s).label }}</span>
+                  <span v-if="s.durationMs" class="step-cost">{{ s.durationMs }}ms</span>
+                  <el-icon class="step-toggle"><ArrowDown /></el-icon>
+                </div>
                 <span v-if="s.type !== 'plan' && s.type !== 'conclusion'" class="step-tool">{{ s.name }}</span>
-                <span v-if="s.durationMs" class="step-cost">{{ s.durationMs }}ms</span>
-                <el-icon class="step-toggle"><ArrowDown /></el-icon>
               </div>
               <div v-show="s.expanded" class="step-body">
                 <!-- 分析规划：LLM 输出的分析路径 -->
@@ -693,10 +695,16 @@ onBeforeUnmount(() => disposeCharts())
 }
 .step-head {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
   cursor: pointer;
   user-select: none;
+}
+.step-head-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
 }
 .step-index {
   width: 20px;
@@ -718,11 +726,21 @@ onBeforeUnmount(() => disposeCharts())
   to { transform: rotate(360deg); }
 }
 .step-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-weight: 600;
   font-size: 13px;
   color: #0b84bb;
 }
 .step-tool {
+  align-self: flex-start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 11px;
   color: #98a4b3;
   background: #eef2f7;
@@ -736,6 +754,7 @@ onBeforeUnmount(() => disposeCharts())
 }
 .step-cost {
   margin-left: auto;
+  flex-shrink: 0;
   font-size: 12px;
   color: #98a4b3;
 }

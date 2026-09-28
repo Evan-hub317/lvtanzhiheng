@@ -30,7 +30,7 @@
     <!-- 行1：年度趋势 + 结构图 -->
     <el-row :gutter="16">
       <el-col :xs="24" :md="16">
-        <div class="tech-panel">
+        <div class="tech-panel row-fill">
           <div class="tech-panel-title">{{ currentRegionName }} · 年度碳排放趋势{{ energyName ? '（' + energyName + '）' : '' }}</div>
           <div ref="trendRef" class="chart-box"></div>
         </div>
@@ -38,10 +38,11 @@
       <el-col :xs="24" :md="8">
         <div class="tech-panel">
           <div class="tech-panel-title">
-            {{ filters.year }} 年排放结构
+            {{ structTitle }}
             <el-radio-group v-model="structType" size="small" class="struct-switch" @change="onStructTypeChange">
               <el-radio-button value="industry">行业</el-radio-button>
-              <el-radio-button value="energy">能源</el-radio-button>
+              <el-radio-button value="energy">能源（直接）</el-radio-button>
+              <el-radio-button value="indirect">能源（间接）</el-radio-button>
             </el-radio-group>
           </div>
           <div ref="pieRef" class="chart-box"></div>
@@ -62,7 +63,9 @@
       <el-col :xs="24" :md="12">
         <div class="tech-panel">
           <div class="tech-panel-title">{{ filters.year }} 年各市排放排行</div>
-          <div ref="rankRef" class="chart-box"></div>
+          <div class="rank-scroll">
+            <div ref="rankRef" class="chart-box rank-chart"></div>
+          </div>
         </div>
       </el-col>
     </el-row>
@@ -113,7 +116,7 @@ import { regionListApi, industryListApi, energyListApi } from '@/api/dict'
 import RegionSelect from '@/components/RegionSelect.vue'
 import { dataStatusApi } from '@/api/data'
 import {
-  trendApi, structureApi, energyStructureApi,
+  trendApi, structureApi, energyStructureApi, indirectApi,
   monthlyTrendApi, regionRankingApi, detailPageApi
 } from '@/api/analysis'
 
@@ -127,6 +130,12 @@ const yearOptions = ref([])
 
 const filters = reactive({ regionId: 1, year: null, industryId: null, energyId: null })
 const structType = ref('industry')
+
+const structTitle = computed(() => {
+  if (structType.value === 'industry') return `${filters.year} 年行业排放结构`
+  if (structType.value === 'energy') return `${filters.year} 年能源结构（直接排放）`
+  return `${filters.year} 年间接排放结构`
+})
 
 const currentRegionName = computed(
   () => regions.value.find(r => r.id === filters.regionId)?.regionName || '全国'
@@ -188,19 +197,20 @@ function renderStructure(rows) {
   }
   pieChart.setOption({
     graphic: null,
-    tooltip: { trigger: 'item', formatter: '{b}：{c} 万吨（{d}%）' },
-    legend: { bottom: 0, icon: 'circle', textStyle: { color: '#51606e' } },
+    tooltip: { trigger: 'item', formatter: '{b}：{c} 亿吨（{d}%）' },
+    legend: { bottom: 0, type: 'scroll', icon: 'circle', itemGap: 10, textStyle: { color: '#51606e', fontSize: 11 } },
     color: ['#0ea5e9', '#06b6d4', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#64748b', '#f97316'],
     series: [{
-      type: 'pie', radius: ['42%', '66%'], center: ['50%', '44%'],
+      type: 'pie', radius: ['38%', '58%'], center: ['50%', '42%'],
       itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-      label: { formatter: '{b}\n{d}%', color: '#51606e' },
+      label: { formatter: '{b}\n{d}%', color: '#51606e', fontSize: 11 },
+      labelLine: { length: 10, length2: 6 },
       data: rows.map(r => ({
         name: r.industryName || r.energyName,
-        value: Number((r.emission / 10000).toFixed(1))
+        value: Number((r.emission / 1e8).toFixed(2))
       }))
     }]
-  })
+  }, true)  // notMerge：切换 Tab 时全量替换，避免旧图残留
   pieChart.off('click')
   pieChart.on('click', params => {
     if (structType.value === 'industry') {
@@ -247,6 +257,10 @@ function renderMonthly(rows) {
 }
 
 function renderRanking(rows) {
+  // 城市多时按固定行高撑高图表，卡片高度不变，容器内滚动（避免几百个城市挤在一起）
+  const rowHeight = 36
+  const count = rows?.length || 0
+  rankRef.value.style.height = Math.max(300, count * rowHeight + 24) + 'px'
   rankChart = rankChart || echarts.init(rankRef.value)
   if (!rows?.length) {
     rankChart.setOption({ graphic: emptyGraphic('暂无数据') }, true)
@@ -267,7 +281,7 @@ function renderRanking(rows) {
       axisLine: { lineStyle: { color: '#c4d0dd' } }, axisLabel: { color: '#51606e' }
     },
     series: [{
-      type: 'bar', barMaxWidth: 20, data: sorted.map(r => r.emission),
+      type: 'bar', barMaxWidth: 14, barCategoryGap: '55%', data: sorted.map(r => r.emission),
       itemStyle: {
         borderRadius: [0, 5, 5, 0],
         color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
@@ -275,6 +289,16 @@ function renderRanking(rows) {
         ])
       }
     }]
+  })
+  rankChart.resize()
+  // 点击城市 → 切换区域下钻（其余图表联动该市数据）
+  rankChart.off('click')
+  rankChart.on('click', params => {
+    const city = regions.value.find(r => r.regionName === params.name)
+    if (city) {
+      filters.regionId = city.id
+      onRegionChange()
+    }
   })
 }
 
@@ -327,10 +351,17 @@ async function loadTrend(seq) {
 
 async function loadStructure(seq) {
   const params = { regionId: filters.regionId, year: filters.year }
-  const res = structType.value === 'industry'
-    ? await structureApi(params)
-    : await energyStructureApi(params)
-  if (seq === mainSeq) {
+  let res = null
+  if (structType.value === 'industry') {
+    res = await structureApi(params)
+  }
+  if (structType.value === 'energy') {
+    res = await energyStructureApi(params)
+  }
+  if (structType.value === 'indirect') {
+    res = await indirectApi(params)
+  }
+  if (seq === mainSeq && res) {
     renderStructure(res.data)
   }
 }
@@ -467,9 +498,32 @@ onBeforeUnmount(() => {
 }
 .struct-switch {
   margin-left: 12px;
+  white-space: nowrap;
+}
+.tech-panel-title {
+  flex-wrap: wrap;
+  row-gap: 4px;
 }
 .chart-box {
   height: 300px;
+}
+/* 城市排行：卡片高度固定，图表按行数撑高后容器内滚动 */
+.rank-scroll {
+  height: 300px;
+  overflow-y: auto;
+}
+.rank-chart {
+  height: auto;
+}
+/* 趋势卡片：高度跟随同行右侧饼图卡片（el-row 拉伸等高），图表撑满剩余空间 */
+.row-fill {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.row-fill .chart-box {
+  flex: 1;
+  height: auto;
 }
 .pager {
   display: flex;

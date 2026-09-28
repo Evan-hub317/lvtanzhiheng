@@ -86,6 +86,11 @@ public class AnalysisServiceImpl implements AnalysisService {
     }
 
     @Override
+    public List<EnergyStructureVO> indirect(int year) {
+        return yearMapper.selectIndirect(year);
+    }
+
+    @Override
     public List<RegionRankVO> provinceEmissions(int year) {
         return yearMapper.selectProvinceRanking(year);
     }

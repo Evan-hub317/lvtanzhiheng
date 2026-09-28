@@ -34,6 +34,7 @@ public interface FactEmissionYearMapper extends BaseMapper<FactEmissionYear> {
     @Select("<script>" +
             "SELECT year, ROUND(SUM(emission), 2) AS emission FROM fact_emission_year " +
             "WHERE year BETWEEN #{startYear} AND #{endYear} " +
+            "<if test='energyId == null'> AND energy_id &lt;= 6</if>" +
             "<if test='energyId != null'> AND energy_id = #{energyId}</if> " +
             "GROUP BY year ORDER BY year" +
             "</script>")
@@ -46,6 +47,7 @@ public interface FactEmissionYearMapper extends BaseMapper<FactEmissionYear> {
             "SELECT year, ROUND(SUM(emission), 2) AS emission FROM fact_emission_year " +
             "WHERE region_id IN (SELECT id FROM dim_region WHERE id = #{regionId} OR parent_id = #{regionId}) " +
             "AND year BETWEEN #{startYear} AND #{endYear} " +
+            "<if test='energyId == null'> AND energy_id &lt;= 6</if>" +
             "<if test='energyId != null'> AND energy_id = #{energyId}</if> " +
             "GROUP BY year ORDER BY year" +
             "</script>")
@@ -57,33 +59,33 @@ public interface FactEmissionYearMapper extends BaseMapper<FactEmissionYear> {
     /** 全省（regionId=1）：某年行业排放结构 */
     @Select("SELECT i.id AS industryId, i.industry_name AS industryName, ROUND(SUM(e.emission), 2) AS emission " +
             "FROM fact_emission_year e JOIN dim_industry i ON e.industry_id = i.id " +
-            "WHERE e.year = #{year} GROUP BY i.id, i.industry_name ORDER BY i.id")
+            "WHERE e.year = #{year} AND e.energy_id <= 6 GROUP BY i.id, i.industry_name ORDER BY i.id")
     List<StructureVO> selectStructureAll(@Param("year") int year);
 
     /** 指定市：某年行业排放结构 */
     @Select("SELECT i.id AS industryId, i.industry_name AS industryName, ROUND(SUM(e.emission), 2) AS emission " +
             "FROM fact_emission_year e JOIN dim_industry i ON e.industry_id = i.id " +
-            "WHERE e.year = #{year} AND e.region_id IN " +
+            "WHERE e.year = #{year} AND e.energy_id <= 6 AND e.region_id IN " +
             "(SELECT id FROM dim_region WHERE id = #{regionId} OR parent_id = #{regionId}) " +
             "GROUP BY i.id, i.industry_name ORDER BY i.id")
     List<StructureVO> selectStructureByRegion(@Param("regionId") int regionId, @Param("year") int year);
 
     /** 全国年度排放总量（tCO2，校准校验用；单位换算由调用方负责） */
-    @Select("SELECT ROUND(SUM(emission), 2) FROM fact_emission_year WHERE year = #{year}")
+    @Select("SELECT ROUND(SUM(emission), 2) FROM fact_emission_year WHERE year = #{year} AND energy_id <= 6")
     BigDecimal selectNationalTotal(@Param("year") int year);
 
     /** 某省下辖各市年度排放排行（降序） */
     @Select("SELECT c.id AS regionId, c.region_name AS regionName, ROUND(SUM(y.emission), 2) AS emission " +
             "FROM fact_emission_year y " +
             "JOIN dim_region c ON c.id = y.region_id " +
-            "WHERE y.year = #{year} AND c.level = 2 AND c.parent_id = #{provinceId} " +
+            "WHERE y.year = #{year} AND y.energy_id <= 6 AND c.level = 2 AND c.parent_id = #{provinceId} " +
             "GROUP BY c.id, c.region_name ORDER BY emission DESC")
     List<RegionRankVO> selectCityRankingByProvince(@Param("provinceId") int provinceId, @Param("year") int year);
 
     /** 全国：某行业年度排放趋势 */
     @Select("<script>" +
             "SELECT year, ROUND(SUM(emission), 2) AS emission FROM fact_emission_year " +
-            "WHERE year BETWEEN #{startYear} AND #{endYear} AND industry_id = #{industryId} " +
+            "WHERE year BETWEEN #{startYear} AND #{endYear} AND industry_id = #{industryId} AND energy_id &lt;= 6 " +
             "GROUP BY year ORDER BY year" +
             "</script>")
     List<TrendVO> selectTrendAllByIndustry(@Param("startYear") int startYear,
@@ -94,7 +96,7 @@ public interface FactEmissionYearMapper extends BaseMapper<FactEmissionYear> {
     @Select("<script>" +
             "SELECT year, ROUND(SUM(emission), 2) AS emission FROM fact_emission_year " +
             "WHERE region_id IN (SELECT id FROM dim_region WHERE id = #{regionId} OR parent_id = #{regionId}) " +
-            "AND year BETWEEN #{startYear} AND #{endYear} AND industry_id = #{industryId} " +
+            "AND year BETWEEN #{startYear} AND #{endYear} AND industry_id = #{industryId} AND energy_id &lt;= 6 " +
             "GROUP BY year ORDER BY year" +
             "</script>")
     List<TrendVO> selectTrendByRegionIndustry(@Param("regionId") int regionId,
@@ -107,13 +109,13 @@ public interface FactEmissionYearMapper extends BaseMapper<FactEmissionYear> {
             "FROM fact_emission_year y " +
             "JOIN dim_region r ON r.id = y.region_id " +
             "JOIN dim_region p ON p.id = IF(r.level = 2, r.parent_id, r.id) " +
-            "WHERE y.year = #{year} GROUP BY p.id, p.region_name ORDER BY emission DESC")
+            "WHERE y.year = #{year} AND y.energy_id <= 6 GROUP BY p.id, p.region_name ORDER BY emission DESC")
     List<RegionRankVO> selectProvinceRanking(@Param("year") int year);
 
     /** 全省（regionId=1）：某年能源结构 */
     @Select("SELECT e.id AS energyId, e.energy_name AS energyName, ROUND(SUM(y.emission), 2) AS emission " +
             "FROM fact_emission_year y JOIN dim_energy e ON y.energy_id = e.id " +
-            "WHERE y.year = #{year} GROUP BY e.id, e.energy_name ORDER BY e.id")
+            "WHERE y.year = #{year} AND y.energy_id <= 6 GROUP BY e.id, e.energy_name ORDER BY e.id")
     List<EnergyStructureVO> selectEnergyStructureAll(@Param("year") int year);
 
     /** 指定市：某年能源结构 */
@@ -121,14 +123,20 @@ public interface FactEmissionYearMapper extends BaseMapper<FactEmissionYear> {
             "FROM fact_emission_year y JOIN dim_energy e ON y.energy_id = e.id " +
             "WHERE y.year = #{year} AND y.region_id IN " +
             "(SELECT id FROM dim_region WHERE id = #{regionId} OR parent_id = #{regionId}) " +
-            "GROUP BY e.id, e.energy_name ORDER BY e.id")
+            "AND y.energy_id <= 6 GROUP BY e.id, e.energy_name ORDER BY e.id")
     List<EnergyStructureVO> selectEnergyStructureByRegion(@Param("regionId") int regionId, @Param("year") int year);
+
+    /** 某年电力/热力间接排放（二次能源，展示口径，不计入总量） */
+    @Select("SELECT e.id AS energyId, e.energy_name AS energyName, ROUND(SUM(y.emission), 2) AS emission " +
+            "FROM fact_emission_year y JOIN dim_energy e ON y.energy_id = e.id " +
+            "WHERE y.year = #{year} AND y.energy_id > 6 GROUP BY e.id, e.energy_name ORDER BY e.id")
+    List<EnergyStructureVO> selectIndirect(@Param("year") int year);
 
     /** 某年各市排放排行（数据粒度为市级，直接归并，降序） */
     @Select("SELECT c.id AS regionId, c.region_name AS regionName, ROUND(SUM(y.emission), 2) AS emission " +
             "FROM fact_emission_year y " +
             "JOIN dim_region c ON c.id = y.region_id " +
-            "WHERE y.year = #{year} AND c.level = 2 " +
+            "WHERE y.year = #{year} AND y.energy_id <= 6 AND c.level = 2 " +
             "GROUP BY c.id, c.region_name ORDER BY emission DESC")
     List<RegionRankVO> selectRegionRanking(@Param("year") int year);
 

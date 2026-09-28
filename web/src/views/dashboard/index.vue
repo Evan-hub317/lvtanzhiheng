@@ -54,7 +54,7 @@
       <el-col :xs="24" :md="8">
         <div class="tech-panel">
           <div class="tech-panel-title">
-            {{ maxYear || '-' }} 年行业排放结构
+            {{ chartYear || '-' }} 年行业排放结构
             <el-tag v-if="!hasEmission" size="small" type="info" effect="plain">暂无数据</el-tag>
             <el-button v-if="hasEmission" link type="primary" class="detail-btn" @click="goAnalysis()">
               查看详情<el-icon><ArrowRight /></el-icon>
@@ -86,7 +86,7 @@ const displayName = computed(
 
 // 跳转数据分析页（支持行业联动参数）
 function goAnalysis(query = {}) {
-  const q = { year: maxYear.value, ...query }
+  const q = { year: chartYear.value, ...query }
   router.push({ path: '/analysis', query: q })
 }
 
@@ -103,6 +103,8 @@ const kpi = ref(null)
 const hasEmission = computed(() => (status.value.emissionCount || 0) > 0)
 const hasData = computed(() => (status.value.totalCount || 0) > 0 && status.value.maxYear != null)
 const maxYear = computed(() => status.value.maxYear ?? null)
+// 图表展示年：年度图表只用最后一个完整年（当年未过完不参与），标题与数据同源
+const chartYear = computed(() => status.value.maxFullYear ?? status.value.maxYear ?? null)
 
 // ===== 统计卡片 =====
 const statCards = reactive([
@@ -235,7 +237,7 @@ async function loadDashboardData() {
   }
   const startYear = status.value.minYear
   // 年度分析一律使用最后一个完整年（当年未过完不参与趋势/KPI）
-  const endYear = status.value.maxFullYear ?? status.value.maxYear
+  const endYear = chartYear.value
   if (hasEmission.value) {
     const [trendRes, structureRes, kpiRes] = await Promise.all([
       trendApi({ regionId: 1, startYear, endYear }),

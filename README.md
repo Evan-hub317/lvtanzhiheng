@@ -10,8 +10,9 @@
 
 | 亮点 | 说明 |
 |---|---|
+| 🧠 **AI 分析助手（Agent）** | 自然语言提问，LLM Function Calling **自主编排 14 个分析工具**，执行链路全程可视化（分析规划 → 工具执行 → 综合结论），"江苏明年会超标吗"一问即答 |
 | 🌏 **全国地图热力大屏** | 31 省排放热力可视化 + 省级下钻，离线可用 |
-| 🤖 **AI 预测与情景仿真** | LSTM 多步直出 + 历史增速校准仿真模型，滑杆拖动实时推演达峰路径 |
+| 🤖 **AI 预测与情景仿真** | LSTM 多步直出 + 历史增速校准仿真模型（省级基准参数），滑杆拖动实时推演达峰路径 |
 | 💬 **AI 碳管家（RAG）** | 政策知识库上传 → 分块向量化 → 检索增强问答，回答必标引用来源 |
 | 🔍 **AI 异常检测** | 孤立森林全量建模，自动识别排放异常点（召回率 92%） |
 | 📄 **AIGC 监测报告** | 一键生成图文报告（DeepSeek 撰写 + 平台图表），导出 PDF |
@@ -25,8 +26,9 @@
 4. **情景仿真**：基线预测（LSTM）与政策仿真（历史增速校准 + 省级基准参数），蒙特卡洛置信区间、达峰识别、情景保存叠加对比
 5. **预警中心**：阈值规则扫描（每日自动）+ 孤立森林 AI 异常检测，处置闭环
 6. **AI 碳管家**：知识库上传（txt/md/pdf/docx）→ 流式 RAG 问答 → 会话留痕
-7. **监测报告**：年报/月报一键生成（AI 撰写 + 趋势/结构附图），打印导出 PDF
-8. **系统管理**：用户/角色管理（RBAC）、个人中心
+7. **AI 分析助手**：对话式分析 Agent——14 个工具自主编排（查询/预测/仿真/异常检测/阈值判断/报告），SSE 流式执行链路可视化，多轮会话有记忆
+8. **监测报告**：年报/月报一键生成（AI 撰写 + 趋势/结构附图），打印导出 PDF
+9. **系统管理**：用户/角色管理（RBAC）、个人中心
 
 ## 🛠 技术架构
 
@@ -34,32 +36,37 @@
 Vue3 + Element Plus + ECharts（前端）
         │ HTTP / SSE
 SpringBoot 3.5 + MyBatis-Plus + MySQL 8 + Redis + Sa-Token（业务层）
-        │ HTTP
+        │ HTTP（算法服务）│ HTTP（Agent 直连 DeepSeek）
 Python FastAPI（算法层）：PyTorch LSTM · sklearn 孤立森林 · 蒙特卡洛
         │              · sentence-transformers RAG · DeepSeek API
 ```
 
-**架构特点**：Java 业务层与 Python 算法层解耦的异构架构；数据库含 19+ 张表（维度/事实/预警/情景/知识库），核算由 SQL 聚合完成（70 万条秒级）。
+**架构特点**：
+- Java 业务层与 Python 算法层解耦的异构架构
+- **对话式 Agent**：Java 层 Function Calling 循环（两阶段：分析规划 → 工具编排），14 个工具复用现有业务服务，SSE 事件流实时推送执行链路
+- 数据库 20 张表（维度/事实/预警/情景/知识库/Agent 会话），核算由 SQL 聚合完成（70 万条秒级）
 
 ## 📁 目录结构
 
 ```
 smart/                 后端（SpringBoot 3.5）
   src/main/java/com/smart/
-    controller/        接口层（认证/数据/核算/分析/仿真/预警/知识库/报告）
+    controller/        接口层（认证/数据/核算/分析/仿真/预警/知识库/报告/Agent）
     service/           业务层（生成器/核算引擎/仿真引擎/预警/RAG 管理）
+      impl/AgentServiceImpl   对话式分析 Agent（14 工具 Function Calling）
     mapper/            MyBatis-Plus 数据访问（核算与钻取为 SQL 聚合）
     client/AlgoClient  Python 算法服务客户端
 web/                   前端（Vue3 + Vite）
-  src/views/           页面（大屏/总览/分析/仿真/预警/AI 管家/报告/登录）
+  src/views/           页面（大屏/总览/分析/仿真/预警/AI 管家/AI 分析助手/报告/登录）
   src/components/      公共组件（RegionSelect 省市级联等）
   src/assets/china.json 全国地图 GeoJSON（本地化，离线可用）
 algo/                  Python 算法服务（FastAPI，端口 8000）
 docs/
-  sql/                 数据库脚本（init / migration_cn / regions_cn）
+  sql/                 数据库脚本（init / migration_cn / regions_cn / agent_session）
   需求规格说明书.md     主 SRS（38 条功能需求）
   需求规格说明书-全国数据生成.md
   可行性分析-全国数据生成.md
+  可行性分析-对话式分析Agent.md
   运行指南.md          详细运行与排障指南
 ```
 
@@ -75,6 +82,7 @@ JDK 17+ · MySQL 8.0+ · Python 3.9+ · Node.js 18+
 mysql -uroot -p < docs/sql/init.sql           # 建库建表 + 基础字典
 mysql -uroot -p < docs/sql/migration_cn.sql   # 结构迁移（省级参数/电网因子/唯一键）
 mysql -uroot -p < docs/sql/regions_cn.sql     # 全国行政区划 + 省级参数 + 电网因子
+mysql -uroot -p < docs/sql/agent_session.sql  # AI 分析助手会话表
 ```
 
 ### 2. Python 算法服务（端口 8000）
@@ -92,6 +100,7 @@ python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```bash
 cd smart
 # 修改 src/main/resources/application.yml 中数据库密码
+# DeepSeek Key 从系统环境变量 DEEPSEEK_API_KEY 读取（AI 分析助手需要）
 ./mvnw.cmd spring-boot:run
 # 接口文档：http://localhost:8080/doc.html
 ```
@@ -130,9 +139,17 @@ curl -X POST http://localhost:8080/calc/execute  -H "satoken: <登录token>" -H 
   → 预警中心（阈值扫描 + AI 检出异常，92% 召回）
   → 数据分析（多维钻取定位异常）
   → 情景仿真（基线不达峰 → 拖滑杆 → 政策路径达峰）
+  → AI 分析助手（"江苏明年会超标吗"→ Agent 自主编排：分析规划→预测→阈值判断→结论）
   → AI 碳管家（政策问答，带引用来源）
   → 监测报告（一键成文导出 PDF）
 ```
+
+**AI 分析助手示例提问**：
+
+- "江苏明年会超标吗？按 12 亿吨算"
+- "河南排放最多的城市是哪个"
+- "江苏各产业的碳排放情况是什么"
+- "全国 2030 年会达峰吗"
 
 ## 📊 数据说明
 
@@ -149,6 +166,7 @@ curl -X POST http://localhost:8080/calc/execute  -H "satoken: <登录token>" -H 
 | [docs/需求规格说明书.md](docs/需求规格说明书.md) | 软件需求规格说明书（SRS） |
 | [docs/可行性分析-全国数据生成.md](docs/可行性分析-全国数据生成.md) | 全国数据生成可行性分析 |
 | [docs/需求规格说明书-全国数据生成.md](docs/需求规格说明书-全国数据生成.md) | 全国数据生成功能 SRS |
+| [docs/可行性分析-对话式分析Agent.md](docs/可行性分析-对话式分析Agent.md) | AI 分析助手（Function Calling Agent）可行性分析 |
 
 ## 📄 License
 

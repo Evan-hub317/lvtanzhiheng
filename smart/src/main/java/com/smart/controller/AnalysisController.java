@@ -77,6 +77,12 @@ public class AnalysisController {
         return Result.ok(analysisService.regionRanking(year));
     }
 
+    @Operation(summary = "某年电力/热力间接排放（展示口径，不计入总量）")
+    @GetMapping("/indirect")
+    public Result<List<EnergyStructureVO>> indirect(@RequestParam int year) {
+        return Result.ok(analysisService.indirect(year));
+    }
+
     @Operation(summary = "全国地图热力数据：各省某年排放总量（大屏数据源）")
     @GetMapping("/map")
     public Result<List<RegionRankVO>> map(@RequestParam int year) {
