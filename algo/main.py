@@ -487,7 +487,7 @@ def load_chunks(force: bool = False) -> list:
     for r in rows:
         # 无向量的分块也保留（哈希检索直接使用 content；BGE 检索时按需过滤）
         item = {
-            "id": r["id"], "doc_name": r["doc_name"],
+            "id": r["id"], "doc_id": r["doc_id"], "doc_name": r["doc_name"],
             "chunk_index": r["chunk_index"], "content": r["content"],
         }
         if r["vector"]:
@@ -576,8 +576,8 @@ def _chat_stream(req: ChatReq):
 
     context_parts, sources = [], []
     for j, (c, sim) in enumerate(hits, start=1):
-        sources.append({"doc_name": c["doc_name"], "chunk_index": c["chunk_index"],
-                        "similarity": round(sim, 4)})
+        sources.append({"doc_id": c["doc_id"], "doc_name": c["doc_name"],
+                        "chunk_index": c["chunk_index"], "similarity": round(sim, 4)})
         context_parts.append(f"[{j}]《{c['doc_name']}》分块{c['chunk_index']}：{c['content'][:600]}")
     context = "\n".join(context_parts)
 
@@ -594,6 +594,8 @@ def _chat_stream(req: ChatReq):
 
     # 首个 SSE 事件携带引用来源
     yield _sse({"sources": sources})
+    answer_text = ""
+    stream_ok = False
     try:
         import httpx
         with httpx.Client(timeout=60) as client:
@@ -608,6 +610,7 @@ def _chat_stream(req: ChatReq):
                     print("[algo] DeepSeek 返回非 200:", resp.status_code, detail)
                     yield _sse({"content": f"（AI 服务调用失败：HTTP {resp.status_code}，{detail}）"})
                 else:
+                    stream_ok = True
                     for line in resp.iter_lines():
                         if not line or not line.startswith("data:"):
                             continue
@@ -616,10 +619,21 @@ def _chat_stream(req: ChatReq):
                             break
                         delta = json.loads(payload)["choices"][0]["delta"].get("content", "")
                         if delta:
+                            answer_text += delta
                             yield _sse({"content": delta})
     except Exception as e:
         print("[algo] DeepSeek 调用失败:", e)
         yield _sse({"content": f"（AI 服务调用异常：{type(e).__name__}）{fallback_answer(question)}"})
+
+    # ---- 引用过滤：仅保留回答中实际引用的分块，与问题无关的检索片段不再列出 ----
+    # 模型被要求按【来源：《文件名》分块N】格式引用；未引用的分块视为与回答无关
+    if sources and stream_ok:
+        cited = [s for s in sources
+                 if s["doc_name"] in answer_text or f"分块{s['chunk_index']}" in answer_text]
+        if cited or "未收录" in answer_text or "暂未" in answer_text:
+            if len(cited) != len(sources):
+                sources = cited
+                yield _sse({"sources": sources})
     yield _sse_done()
 
 

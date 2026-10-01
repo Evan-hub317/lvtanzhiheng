@@ -93,7 +93,16 @@
               <span v-if="streaming && i === messages.length - 1" class="cursor">▌</span>
             </div>
             <div v-if="m.sources && m.sources.length" class="msg-sources">
-              <el-tag v-for="(s, si) in m.sources" :key="si" size="small" type="info" effect="plain" class="source-tag">
+              <el-tag
+                v-for="(s, si) in m.sources"
+                :key="si"
+                size="small"
+                type="info"
+                effect="plain"
+                class="source-tag"
+                title="点击浏览原文并定位到该分块"
+                @click="jumpToSource(s)"
+              >
                 📄 {{ s.doc_name }} 分块{{ s.chunk_index }}
               </el-tag>
             </div>
@@ -104,6 +113,18 @@
       <!-- DOCX 在线预览弹窗（docx-preview 渲染） -->
       <el-dialog v-model="docPreviewVisible" :title="previewDocName" width="80%" top="4vh" destroy-on-close>
         <div ref="docxContainer" class="docx-container" v-loading="docPreviewLoading" element-loading-text="正在渲染文档…"></div>
+      </el-dialog>
+
+      <!-- TXT/MD 原文预览弹窗（定位分块） -->
+      <el-dialog v-model="textPreviewVisible" :title="textPreviewName" width="80%" top="4vh" destroy-on-close>
+        <div ref="textContainer" class="text-container">
+          <pre v-html="textPreviewHtml"></pre>
+        </div>
+      </el-dialog>
+
+      <!-- PDF 应用内预览弹窗（pdf.js 渲染，不依赖浏览器原生预览） -->
+      <el-dialog v-model="pdfPreviewVisible" :title="pdfPreviewName" width="80%" top="4vh" destroy-on-close>
+        <div ref="pdfContainer" class="pdf-container" v-loading="pdfPreviewLoading" element-loading-text="正在渲染 PDF…"></div>
       </el-dialog>
 
       <div class="chat-input">
@@ -130,9 +151,13 @@
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { sessionListApi, messageListApi, saveMessageApi, deleteSessionApi } from '@/api/chat'
-import { kbListApi, kbUploadApi, kbUpdateStatusApi, kbDeleteApi } from '@/api/kb'
+import { kbListApi, kbContentApi, kbUploadApi, kbUpdateStatusApi, kbDeleteApi } from '@/api/kb'
 import { renderAsync } from 'docx-preview'
 import { marked } from 'marked'
+import * as pdfjsLib from 'pdfjs-dist'
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
 const sideTab = ref('sessions')
 const sessions = ref([])
@@ -297,39 +322,277 @@ const docxContainer = ref()
 
 async function viewDoc(d) {
   try {
-    const token = localStorage.getItem('satoken')
-    const resp = await fetch(`/api/kb/${d.id}/file`, { headers: { satoken: token } })
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => null)
-      ElMessage.error(err?.msg || '文件加载失败')
-      return
-    }
-    const blob = await resp.blob()
+    const blob = await fetchDocBlob(d.id)
     if (d.docType === 'docx') {
-      previewDocName.value = d.docName
-      docPreviewVisible.value = true
-      docPreviewLoading.value = true
-      try {
-        // el-dialog 内容为异步挂载，必须等待 nextTick 后容器才存在
-        await nextTick()
-        docxContainer.value.innerHTML = ''
-        await renderAsync(blob, docxContainer.value, null, {
-          inWrapper: true, ignoreWidth: false, ignoreHeight: false,
-          className: 'docx-render', breakPages: true
-        })
-      } catch (e) {
-        console.error('docx 渲染失败', e)
-        ElMessage.error(`文档渲染失败：${e?.message || '格式暂不支持'}`)
-        docPreviewVisible.value = false
-      } finally {
-        docPreviewLoading.value = false
-      }
+      await openDocxPreview(blob, d.docName, null)
+    } else if (d.docType === 'pdf') {
+      await openPdfPreview(blob, d.docName, null)
     } else {
-      const url = URL.createObjectURL(blob)
-      window.open(url, '_blank')
+      await openTextPreview(blob, d.docName, null)
     }
   } catch (e) {
-    ElMessage.error('文件加载失败')
+    ElMessage.error(e.message || '文件加载失败')
+  }
+}
+
+// ===== 引用分块跳转：点击来源 → 浏览原件并定位到分块开头 =====
+async function fetchDocBlob(docId) {
+  const token = localStorage.getItem('satoken')
+  const resp = await fetch(`/api/kb/${docId}/file`, { headers: { satoken: token } })
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => null)
+    throw new Error(err?.msg || '文件加载失败')
+  }
+  return await resp.blob()
+}
+
+// 文档分块内容缓存：docId -> { docType, chunks }
+const chunkCache = new Map()
+
+async function getChunkAnchor(s) {
+  // 新数据带 doc_id；历史会话的旧来源按文档名回查
+  const docId = s.doc_id ?? docs.value.find(d => d.docName === s.doc_name)?.id
+  if (!docId) return null
+  let cached = chunkCache.get(docId)
+  if (!cached) {
+    const res = await kbContentApi(docId)
+    cached = { docType: res.data.docType, chunks: res.data.chunks }
+    chunkCache.set(docId, cached)
+  }
+  const chunk = cached.chunks.find(c => c.chunkIndex === s.chunk_index)
+  return { docId, docType: cached.docType, content: chunk?.content }
+}
+
+async function jumpToSource(s) {
+  let anchor
+  try {
+    anchor = await getChunkAnchor(s)
+  } catch (e) {
+    ElMessage.error('分块信息加载失败')
+    return
+  }
+  if (!anchor) {
+    ElMessage.warning('未找到对应文档，可能已被删除')
+    return
+  }
+  try {
+    const blob = await fetchDocBlob(anchor.docId)
+    if (anchor.docType === 'docx') {
+      await openDocxPreview(blob, s.doc_name, anchor.content)
+    } else if (anchor.docType === 'pdf') {
+      await openPdfPreview(blob, s.doc_name, anchor.content)
+    } else {
+      await openTextPreview(blob, s.doc_name, anchor.content)
+    }
+  } catch (e) {
+    ElMessage.error(e.message || '文件加载失败')
+  }
+}
+
+async function openDocxPreview(blob, docName, anchorText) {
+  previewDocName.value = docName
+  docPreviewVisible.value = true
+  docPreviewLoading.value = true
+  try {
+    // el-dialog 内容为异步挂载，必须等待 nextTick 后容器才存在
+    await nextTick()
+    docxContainer.value.innerHTML = ''
+    await renderAsync(blob, docxContainer.value, null, {
+      inWrapper: true, ignoreWidth: false, ignoreHeight: false,
+      className: 'docx-render', breakPages: true
+    })
+    if (anchorText) {
+      await nextTick()
+      locateInDocx(docxContainer.value, anchorText)
+    }
+  } catch (e) {
+    console.error('docx 渲染失败', e)
+    ElMessage.error(`文档渲染失败：${e?.message || '格式暂不支持'}`)
+    docPreviewVisible.value = false
+  } finally {
+    docPreviewLoading.value = false
+  }
+}
+
+// 在 docx-preview 渲染出的 DOM 中查找分块文本并滚动定位
+// 关键：按块级元素（段落/标题/分页）插入空格分隔再拼接，与后端分块文本（段落间换行）对齐，
+// 否则段落边界处两个词会粘连（"…监管。二是…"），导致与分块文本（"…监管。 二是…"）匹配失败
+const BLOCK_TAGS = new Set(['P', 'DIV', 'SECTION', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'TR', 'BR'])
+
+function locateInDocx(root, anchor) {
+  const normalize = t => t.replace(/\s+/g, ' ')
+  const strip = t => t.replace(/\s+/g, '')
+  const parts = [] // { el, normStart, normLen, stripStart, stripLen }
+  let bufNorm = ''
+  let bufStrip = ''
+
+  function walk(el) {
+    for (const child of el.childNodes) {
+      if (child.nodeType === 3) {
+        const t = normalize(child.nodeValue)
+        if (!t.trim()) continue
+        parts.push({
+          el: child.parentElement,
+          normStart: bufNorm.length, normLen: t.length,
+          stripStart: bufStrip.length, stripLen: strip(t).length
+        })
+        bufNorm += t
+        bufStrip += strip(t)
+      } else if (child.nodeType === 1) {
+        if (BLOCK_TAGS.has(child.tagName)) {
+          if (bufNorm && !bufNorm.endsWith(' ')) bufNorm += ' '
+          walk(child)
+          if (bufNorm && !bufNorm.endsWith(' ')) bufNorm += ' '
+        } else {
+          walk(child)
+        }
+      }
+    }
+  }
+  walk(root)
+
+  // 依次尝试：归一化空格匹配 → 去全部空白匹配；全文 → 前缀退化
+  const candidates = [
+    { buf: bufNorm, start: p => p.normStart, len: p => p.normLen, text: normalize(anchor).trim() },
+    { buf: bufStrip, start: p => p.stripStart, len: p => p.stripLen, text: strip(anchor) }
+  ]
+  for (const c of candidates) {
+    if (!c.text) continue
+    let idx = c.buf.indexOf(c.text)
+    if (idx < 0) {
+      const shorter = c.text.slice(0, Math.max(12, Math.floor(c.text.length / 2)))
+      idx = c.buf.indexOf(shorter)
+    }
+    if (idx < 0) continue
+    const hit = parts.find(p => idx >= c.start(p) && idx < c.start(p) + c.len(p))
+    const el = hit?.el
+    if (el) {
+      el.classList.add('chunk-anchor-el')
+      el.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      return true
+    }
+  }
+  ElMessage.info('已打开文档，但未定位到该分块（分块内容与原件排版可能不一致）')
+  return false
+}
+
+// TXT/MD 原文预览：全文转义渲染，分块文本高亮并滚动到该处
+const textPreviewVisible = ref(false)
+const textPreviewName = ref('')
+const textPreviewHtml = ref('')
+const textContainer = ref()
+
+function escapeHtml(str) {
+  return str.replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ))
+}
+
+// PDF 应用内预览：pdf.js 逐页渲染到 canvas；分块定位用文本层坐标换算页面内滚动位置
+const PDF_SCALE = 1.5
+const pdfPreviewVisible = ref(false)
+const pdfPreviewLoading = ref(false)
+const pdfPreviewName = ref('')
+const pdfContainer = ref()
+
+// 在 PDF 文本层中查找分块开头：逐页拼接去空白文本，返回 { page, top }（top 为渲染后的页内像素偏移）
+async function findPdfAnchor(pdf, anchorText) {
+  const strip = t => t.replace(/\s+/g, '')
+  const target = strip(anchorText)
+  for (const len of [80, 40, 20]) {
+    const key = target.slice(0, len)
+    if (!key) break
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p)
+      const tc = await page.getTextContent()
+      let text = ''
+      const ranges = [] // 去空白坐标下的 { start, len, y }
+      for (const it of tc.items) {
+        const s = strip(it.str || '')
+        if (!s) continue
+        ranges.push({ start: text.length, len: s.length, y: it.transform[5] })
+        text += s
+      }
+      const idx = text.indexOf(key)
+      if (idx >= 0) {
+        const hit = ranges.find(r => idx >= r.start && idx < r.start + r.len)
+        // PDF 坐标系原点在左下角：换算为距页面顶部的渲染像素
+        const vp = page.getViewport({ scale: 1 })
+        const top = (vp.height - (hit ? hit.y : vp.height)) * PDF_SCALE
+        return { page: p, top }
+      }
+    }
+  }
+  return null
+}
+
+async function openPdfPreview(blob, docName, anchorText) {
+  pdfPreviewName.value = docName
+  pdfPreviewVisible.value = true
+  pdfPreviewLoading.value = true
+  try {
+    await nextTick()
+    pdfContainer.value.innerHTML = ''
+    const pdf = await pdfjsLib.getDocument({ data: await blob.arrayBuffer() }).promise
+    // 先定位分块（纯文本层操作，渲染前完成）
+    const anchor = anchorText ? await findPdfAnchor(pdf, anchorText) : null
+    // 逐页渲染（先建 canvas 保持 DOM 顺序，再并行渲染）
+    const renderTasks = []
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p)
+      const viewport = page.getViewport({ scale: PDF_SCALE })
+      const canvas = document.createElement('canvas')
+      canvas.className = 'pdf-page'
+      canvas.dataset.page = p
+      canvas.width = Math.floor(viewport.width)
+      canvas.height = Math.floor(viewport.height)
+      pdfContainer.value.appendChild(canvas)
+      renderTasks.push(page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise)
+    }
+    await Promise.all(renderTasks)
+    if (anchor) {
+      const canvas = pdfContainer.value.querySelector(`canvas[data-page="${anchor.page}"]`)
+      if (canvas) {
+        canvas.classList.add('chunk-anchor-el')
+        await nextTick()
+        pdfContainer.value.scrollTo({ top: canvas.offsetTop + Math.max(0, anchor.top - 40), behavior: 'smooth' })
+      } else {
+        ElMessage.info('已打开文档，但未定位到该分块')
+      }
+    }
+  } catch (e) {
+    console.error('pdf 渲染失败', e)
+    ElMessage.error(`PDF 渲染失败：${e?.message || '格式暂不支持'}`)
+    pdfPreviewVisible.value = false
+  } finally {
+    pdfPreviewLoading.value = false
+  }
+}
+
+async function openTextPreview(blob, docName, anchorText) {
+  const text = await blob.text()
+  textPreviewName.value = docName
+  textPreviewVisible.value = true
+  let html = escapeHtml(text)
+  if (anchorText) {
+    const escTarget = escapeHtml(anchorText.trim())
+    let idx = html.indexOf(escTarget)
+    let target = escTarget
+    if (idx < 0) {
+      target = escapeHtml(anchorText.trim().slice(0, Math.max(12, Math.floor(anchorText.length / 2))))
+      idx = html.indexOf(target)
+    }
+    if (idx >= 0) {
+      html = html.slice(0, idx) + '<mark>' + target + '</mark>' + html.slice(idx + target.length)
+    }
+  }
+  textPreviewHtml.value = html
+  await nextTick()
+  const mark = textContainer.value?.querySelector('mark')
+  if (mark) {
+    mark.scrollIntoView({ block: 'start' })
+  } else if (anchorText) {
+    ElMessage.info('已打开文档，但未定位到该分块')
   }
 }
 
@@ -605,6 +868,12 @@ onBeforeUnmount(() => {
 }
 .source-tag {
   font-size: 11px;
+  cursor: pointer;
+}
+.source-tag:hover {
+  background: #e7f7fd;
+  border-color: #0ea5e9;
+  color: #0ea5e9;
 }
 
 .chat-input {
@@ -631,13 +900,71 @@ onBeforeUnmount(() => {
   background: #f0f2f5;
   padding: 12px;
 }
-.docx-container :deep(.docx-wrapper) {
-  background: #fff;
+/* docx-preview 传入 className:'docx-render'，包裹层/页面真实类名为 *-render-* */
+.docx-container :deep(.docx-render-wrapper) {
+  background: transparent;
   max-width: 100%;
-  padding: 40px 48px;
-  box-shadow: 0 2px 10px rgba(16, 42, 67, 0.08);
+  padding: 8px;
+  box-sizing: border-box;
 }
-.docx-container :deep(.docx-wrapper section) {
-  margin-bottom: 24px;
+/* 页面边距来自文档自身的 sectPr/pgMar（内联样式）；没有设置边距的文档为 0 导致内容贴边。
+   强制统一最小页边距（!important 覆盖内联样式），保证所有文档内容与纸边都有间距 */
+.docx-container :deep(.docx-render-wrapper > section.docx-render) {
+  margin-bottom: 20px;
+  padding: 32px 44px !important;
+  box-sizing: border-box;
+  max-width: 100%;
+}
+/* 定位到的分块位置高亮 */
+.docx-container :deep(.chunk-anchor-el) {
+  background: #fff3c4;
+  border-radius: 3px;
+}
+
+/* ===== TXT/MD 原文预览 ===== */
+.text-container {
+  min-height: 300px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #eef2f7;
+  border-radius: 8px;
+  padding: 16px 20px;
+}
+.text-container :deep(pre) {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.8;
+  color: #1f2d3d;
+  margin: 0;
+}
+.text-container :deep(mark) {
+  background: #fff3c4;
+  padding: 0 2px;
+  border-radius: 3px;
+  scroll-margin-top: 12px;
+}
+
+/* ===== PDF 应用内预览 ===== */
+.pdf-container {
+  min-height: 300px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+  background: #525659;
+  padding: 16px;
+}
+.pdf-container :deep(.pdf-page) {
+  display: block;
+  margin: 0 auto 14px;
+  background: #fff;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  max-width: 100%;
+  height: auto;
+}
+.pdf-container :deep(.chunk-anchor-el) {
+  outline: 3px solid #f59e0b;
+  outline-offset: -3px;
 }
 </style>
