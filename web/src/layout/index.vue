@@ -82,7 +82,7 @@ const allMenus = [
   { path: '/screen', title: '监测大屏', icon: 'Monitor' },
   { path: '/analysis', title: '数据分析', icon: 'TrendCharts' },
   { path: '/simulation', title: '情景仿真', icon: 'MagicStick' },
-  { path: '/ai-chat', title: 'AI 碳管家', icon: 'ChatDotRound' },
+  { path: '/ai-chat', title: 'AI 知识库', icon: 'ChatDotRound' },
   { path: '/agent', title: 'AI 分析助手', icon: 'Cpu' },
   { path: '/alert', title: '预警中心', icon: 'Bell' },
   { path: '/report', title: '监测报告', icon: 'Document' },

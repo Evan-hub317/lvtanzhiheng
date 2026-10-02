@@ -64,7 +64,7 @@
         <div class="chat-header-title">
           <span class="bot-icon">🌿</span>
           <div>
-            <div class="bot-name">AI 碳管家</div>
+            <div class="bot-name">AI 知识库</div>
             <div class="bot-desc">基于政策知识库的检索增强问答（RAG）</div>
           </div>
         </div>
@@ -76,7 +76,7 @@
       <div ref="msgBox" class="chat-messages">
         <div v-if="!messages.length && !streaming" class="chat-welcome">
           <div class="welcome-bot">🌿</div>
-          <h3>您好，我是 AI 碳管家</h3>
+          <h3>您好，我是 AI 知识库</h3>
           <p>我可以基于已上传的政策文件回答碳排放相关问题，并标注引用来源</p>
           <div class="quick-questions">
             <el-tag v-for="q in quickQuestions" :key="q" class="quick-q" @click="inputText = q">
@@ -415,34 +415,63 @@ async function openDocxPreview(blob, docName, anchorText) {
 }
 
 // 在 docx-preview 渲染出的 DOM 中查找分块文本并滚动定位
-// 关键：按块级元素（段落/标题/分页）插入空格分隔再拼接，与后端分块文本（段落间换行）对齐，
-// 否则段落边界处两个词会粘连（"…监管。二是…"），导致与分块文本（"…监管。 二是…"）匹配失败
+// 后端分块文本做过空白折叠（\s+ → 单个空格，KBServiceImpl），因此与渲染原文永远不完全一致，
+// 必须按同样规则归一化后匹配，再通过“归一化字符 → 原始字符”映射回文本节点做逐字高亮
 const BLOCK_TAGS = new Set(['P', 'DIV', 'SECTION', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'TR', 'BR'])
 
+// 归一化串字符 i 在原始串中的偏移映射（空白折叠映射到折叠段首字符）
+function buildCharMap(raw, norm) {
+  const map = []
+  let r = 0
+  for (let i = 0; i < norm.length; i++) {
+    while (r < raw.length && /\s/.test(raw[r])) r++
+    map.push(r)
+    r++
+  }
+  return map
+}
+
+// 滚动容器使目标元素出现在顶部（用可视矩形差值，不受弹窗过渡 transform 影响）
+function scrollToInContainer(container, el, margin = 40) {
+  if (!container || !el) return
+  const delta = el.getBoundingClientRect().top - container.getBoundingClientRect().top - margin
+  container.scrollTop += delta
+}
+
 function locateInDocx(root, anchor) {
+  const anchorText = (anchor || '').trim()
   const normalize = t => t.replace(/\s+/g, ' ')
   const strip = t => t.replace(/\s+/g, '')
-  const parts = [] // { el, normStart, normLen, stripStart, stripLen }
+
+  // 一次遍历构建三种缓冲（norm/raw/strip）+ 字符映射，三者共享文本节点记录
+  const parts = [] // { node, el, normStart, normLen, map, rawStart, rawLen, stripStart, stripLen }
   let bufNorm = ''
+  let bufRaw = ''
   let bufStrip = ''
 
   function walk(el) {
     for (const child of el.childNodes) {
       if (child.nodeType === 3) {
-        const t = normalize(child.nodeValue)
-        if (!t.trim()) continue
+        const raw = child.nodeValue
+        if (!raw.trim()) continue
+        const t = normalize(raw)
         parts.push({
-          el: child.parentElement,
+          node: child, el: child.parentElement,
           normStart: bufNorm.length, normLen: t.length,
+          map: buildCharMap(raw, t),
+          rawStart: bufRaw.length, rawLen: raw.length,
           stripStart: bufStrip.length, stripLen: strip(t).length
         })
         bufNorm += t
+        bufRaw += raw
         bufStrip += strip(t)
       } else if (child.nodeType === 1) {
         if (BLOCK_TAGS.has(child.tagName)) {
           if (bufNorm && !bufNorm.endsWith(' ')) bufNorm += ' '
+          bufRaw += '\n'
           walk(child)
           if (bufNorm && !bufNorm.endsWith(' ')) bufNorm += ' '
+          bufRaw += '\n'
         } else {
           walk(child)
         }
@@ -451,29 +480,97 @@ function locateInDocx(root, anchor) {
   }
   walk(root)
 
-  // 依次尝试：归一化空格匹配 → 去全部空白匹配；全文 → 前缀退化
-  const candidates = [
-    { buf: bufNorm, start: p => p.normStart, len: p => p.normLen, text: normalize(anchor).trim() },
-    { buf: bufStrip, start: p => p.stripStart, len: p => p.stripLen, text: strip(anchor) }
-  ]
-  for (const c of candidates) {
-    if (!c.text) continue
-    let idx = c.buf.indexOf(c.text)
-    if (idx < 0) {
-      const shorter = c.text.slice(0, Math.max(12, Math.floor(c.text.length / 2)))
-      idx = c.buf.indexOf(shorter)
-    }
+  // ---- 通道1：归一化匹配（与后端分块文本同构），逐字高亮 ----
+  const keys = [normalize(anchorText), normalize(anchorText).slice(0, Math.max(60, Math.floor(anchorText.length / 2)))]
+  for (const key of keys) {
+    if (!key) continue
+    let idx = bufNorm.indexOf(key)
     if (idx < 0) continue
-    const hit = parts.find(p => idx >= c.start(p) && idx < c.start(p) + c.len(p))
-    const el = hit?.el
-    if (el) {
-      el.classList.add('chunk-anchor-el')
-      el.scrollIntoView({ block: 'start', behavior: 'smooth' })
-      return true
+    // 起点可能落在块边界补的空格上，推进到下一个真实字符
+    while (idx < bufNorm.length && !parts.some(p => idx >= p.normStart && idx < p.normStart + p.normLen)) idx++
+    let end = idx + key.length
+    // 终点同理：把边界空格并入高亮区间
+    while (end > idx && !parts.some(p => end - 1 >= p.normStart && end - 1 < p.normStart + p.normLen)) end++
+    const pFirst = parts.find(p => idx >= p.normStart && idx < p.normStart + p.normLen)
+    const pLast = parts.find(p => end - 1 >= p.normStart && end - 1 < p.normStart + p.normLen)
+    if (!pFirst || !pLast) continue
+    const rawStart = pFirst.rawStart + pFirst.map[idx - pFirst.normStart]
+    const rawEnd = pLast.rawStart + pLast.map[end - 1 - pLast.normStart] + 1
+    if (wrapTextRange(root, parts, rawStart, rawEnd)) return true
+  }
+
+  // ---- 通道2：原始文本精确匹配（docx 无空白差异时的直接命中） ----
+  const rawCandidates = [anchorText, anchorText.slice(0, Math.max(60, Math.floor(anchorText.length / 2)))]
+  for (const key of rawCandidates) {
+    if (!key) continue
+    const idx = bufRaw.indexOf(key)
+    if (idx < 0) continue
+    if (wrapTextRange(root, parts, idx, idx + key.length)) return true
+  }
+
+  // ---- 通道3：去全部空白匹配（整段高亮兜底） ----
+  const stripAnchor = strip(anchorText)
+  if (stripAnchor) {
+    let idx = bufStrip.indexOf(stripAnchor)
+    if (idx < 0) {
+      const shorter = stripAnchor.slice(0, Math.max(12, Math.floor(stripAnchor.length / 2)))
+      idx = bufStrip.indexOf(shorter)
+    }
+    if (idx >= 0) {
+      const hit = parts.find(p => idx >= p.stripStart && idx < p.stripStart + p.stripLen)
+      const el = hit?.el
+      if (el) {
+        el.classList.add('chunk-anchor-el')
+        scrollToInContainer(el.closest('.docx-container'), el, 24)
+        return true
+      }
     }
   }
   ElMessage.info('已打开文档，但未定位到该分块（分块内容与原件排版可能不一致）')
   return false
+}
+
+// 把 [rangeStart, rangeEnd) 对应的原始文本片段用 span 逐字高亮（精确到分块真实位置）
+function wrapTextRange(root, parts, rangeStart, rangeEnd) {
+  const first = parts.find(p => rangeStart >= p.rawStart && rangeStart < p.rawStart + p.rawLen)
+  const last = parts.find(p => rangeEnd > p.rawStart && rangeEnd <= p.rawStart + p.rawLen)
+  if (!first || !last) return false
+  const startOffset = rangeStart - first.rawStart
+  const endOffset = rangeEnd - last.rawStart
+  if (first.node === last.node) {
+    last.node.splitText(endOffset)
+    const mid = first.node.splitText(startOffset)
+    const span = document.createElement('span')
+    span.className = 'chunk-anchor-el'
+    mid.parentNode.replaceChild(span, mid)
+    span.appendChild(mid)
+    scrollToInContainer(span.closest('.docx-container'), span, 24)
+    return true
+  }
+  // 跨多个文本节点：切开两端，收集中间所有文本节点逐一包 span
+  last.node.splitText(endOffset)
+  const mid = first.node.splitText(startOffset)
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  const toWrap = []
+  let n
+  let inRange = false
+  while ((n = walker.nextNode())) {
+    if (n === mid) inRange = true
+    if (inRange) toWrap.push(n)
+    if (n === last.node) break
+  }
+  for (const t of toWrap) {
+    if (!t.nodeValue) continue
+    const span = document.createElement('span')
+    span.className = 'chunk-anchor-el'
+    t.parentNode.replaceChild(span, t)
+    span.appendChild(t)
+  }
+  const firstSpan = toWrap[0]?.parentElement
+  if (firstSpan) {
+    scrollToInContainer(firstSpan.closest('.docx-container'), firstSpan, 24)
+  }
+  return true
 }
 
 // TXT/MD 原文预览：全文转义渲染，分块文本高亮并滚动到该处
@@ -495,32 +592,65 @@ const pdfPreviewLoading = ref(false)
 const pdfPreviewName = ref('')
 const pdfContainer = ref()
 
-// 在 PDF 文本层中查找分块开头：逐页拼接去空白文本，返回 { page, top }（top 为渲染后的页内像素偏移）
+// 在 PDF 文本层中查找分块：逐页拼接去空白文本，返回 { page, segs }，
+// segs 为逐行高亮段（分块起点行→终点行的行级矩形，覆盖分块全片区域）
 async function findPdfAnchor(pdf, anchorText) {
   const strip = t => t.replace(/\s+/g, '')
   const target = strip(anchorText)
-  for (const len of [80, 40, 20]) {
+  // 优先全文匹配（高亮覆盖整个分块），跨页/排版差异时退化为前缀匹配
+  for (const len of [target.length, 200, 80, 40, 20]) {
     const key = target.slice(0, len)
     if (!key) break
     for (let p = 1; p <= pdf.numPages; p++) {
       const page = await pdf.getPage(p)
       const tc = await page.getTextContent()
+      const items = []
       let text = ''
-      const ranges = [] // 去空白坐标下的 { start, len, y }
+      const ranges = [] // 去空白坐标下的 { start, len }
       for (const it of tc.items) {
         const s = strip(it.str || '')
         if (!s) continue
-        ranges.push({ start: text.length, len: s.length, y: it.transform[5] })
+        items.push(it)
+        ranges.push({ start: text.length, len: s.length })
         text += s
       }
       const idx = text.indexOf(key)
-      if (idx >= 0) {
-        const hit = ranges.find(r => idx >= r.start && idx < r.start + r.len)
-        // PDF 坐标系原点在左下角：换算为距页面顶部的渲染像素
-        const vp = page.getViewport({ scale: 1 })
-        const top = (vp.height - (hit ? hit.y : vp.height)) * PDF_SCALE
-        return { page: p, top }
+      if (idx < 0) continue
+      const endIdx = idx + key.length - 1
+      const iFirst = ranges.findIndex(r => idx >= r.start && idx < r.start + r.len)
+      const iLast = ranges.findIndex(r => endIdx >= r.start && endIdx < r.start + r.len)
+      if (iFirst < 0 || iLast < 0) continue
+      const vp = page.getViewport({ scale: 1 })
+      // 逐项生成行级高亮段：起点行从匹配字符处开始，终点行到匹配字符处结束，中间行整行覆盖
+      const segs = []
+      for (let i = iFirst; i <= iLast; i++) {
+        const it = items[i]
+        const r = ranges[i]
+        let ratio0 = 0
+        let ratio1 = 1
+        if (i === iFirst) ratio0 = (idx - r.start) / r.len
+        if (i === iLast) ratio1 = (endIdx - r.start + 1) / r.len
+        const glyphH = it.height || 12
+        segs.push({
+          x: (it.transform[4] + (it.width || 0) * ratio0) * PDF_SCALE,
+          top: (vp.height - it.transform[5] - glyphH * 0.8) * PDF_SCALE,
+          width: Math.max((it.width || 0) * (ratio1 - ratio0) * PDF_SCALE, 6),
+          height: glyphH * PDF_SCALE
+        })
       }
+      // 同一行的多个文本项合并为一个框（避免重叠的零碎高亮）
+      const merged = []
+      for (const s of segs) {
+        const m = merged.find(m => Math.abs(m.top - s.top) < 2)
+        if (m) {
+          const end = Math.max(m.x + m.width, s.x + s.width)
+          m.x = Math.min(m.x, s.x)
+          m.width = end - m.x
+        } else {
+          merged.push({ ...s })
+        }
+      }
+      return { page: p, segs: merged }
     }
   }
   return null
@@ -551,11 +681,27 @@ async function openPdfPreview(blob, docName, anchorText) {
     }
     await Promise.all(renderTasks)
     if (anchor) {
-      const canvas = pdfContainer.value.querySelector(`canvas[data-page="${anchor.page}"]`)
-      if (canvas) {
-        canvas.classList.add('chunk-anchor-el')
+      const pageCanvas = pdfContainer.value.querySelector(`canvas[data-page="${anchor.page}"]`)
+      if (pageCanvas) {
+        // 页 canvas 外包一层定位容器，叠放逐行高亮框
+        const wrap = document.createElement('div')
+        wrap.className = 'pdf-page-wrap'
+        pageCanvas.parentNode.replaceChild(wrap, pageCanvas)
+        wrap.appendChild(pageCanvas)
+        for (const seg of anchor.segs) {
+          const mark = document.createElement('div')
+          mark.className = 'chunk-anchor-el'
+          wrap.appendChild(mark)
+          // canvas 可能因 max-width:100% 被等比缩小显示，高亮框坐标须按显示比例修正
+          const ratio = (pageCanvas.clientWidth / pageCanvas.width) || 1
+          mark.style.left = seg.x * ratio + 'px'
+          mark.style.top = seg.top * ratio + 'px'
+          mark.style.width = Math.max(seg.width * ratio, 8) + 'px'
+          mark.style.height = Math.max(seg.height * ratio, 10) + 'px'
+        }
         await nextTick()
-        pdfContainer.value.scrollTo({ top: canvas.offsetTop + Math.max(0, anchor.top - 40), behavior: 'smooth' })
+        const first = wrap.querySelector('.chunk-anchor-el')
+        scrollToInContainer(pdfContainer.value, first, 60)
       } else {
         ElMessage.info('已打开文档，但未定位到该分块')
       }
@@ -915,10 +1061,11 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   max-width: 100%;
 }
-/* 定位到的分块位置高亮 */
+/* 定位到的分块位置高亮（docx：逐字 span） */
 .docx-container :deep(.chunk-anchor-el) {
   background: #fff3c4;
   border-radius: 3px;
+  scroll-margin-top: 24px;
 }
 
 /* ===== TXT/MD 原文预览 ===== */
@@ -955,6 +1102,12 @@ onBeforeUnmount(() => {
   background: #525659;
   padding: 16px;
 }
+.pdf-container :deep(.pdf-page-wrap) {
+  position: relative;
+  margin: 0 auto 14px;
+  width: fit-content;
+  max-width: 100%;
+}
 .pdf-container :deep(.pdf-page) {
   display: block;
   margin: 0 auto 14px;
@@ -963,8 +1116,11 @@ onBeforeUnmount(() => {
   max-width: 100%;
   height: auto;
 }
+/* PDF：行级半透明高亮框，覆盖在页 canvas 上 */
 .pdf-container :deep(.chunk-anchor-el) {
-  outline: 3px solid #f59e0b;
-  outline-offset: -3px;
+  position: absolute;
+  background: rgba(255, 211, 74, 0.45);
+  border-radius: 3px;
+  pointer-events: none;
 }
 </style>

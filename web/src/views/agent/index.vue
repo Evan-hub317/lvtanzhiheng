@@ -1,25 +1,33 @@
 <template>
   <div class="agent-page">
     <el-row :gutter="16">
-      <!-- 最左：历史会话 -->
-      <el-col :xs="24" :md="6">
-        <div class="tech-panel sessions-panel">
-          <div class="tech-panel-title">历史会话</div>
-          <div v-for="s in sessions" :key="s.id" class="session-item" :class="{ active: s.id === currentSessionId }" @click="loadSession(s)">
-            <div class="session-main">
-              <div class="session-title" :title="s.title">{{ s.title }}</div>
-              <div class="session-time">{{ s.updateTime }}</div>
-            </div>
-            <el-icon class="session-delete" title="删除会话" @click.stop="handleDeleteSession(s)">
-              <Delete />
-            </el-icon>
+      <!-- 最左：历史会话（整栏可向左收起） -->
+      <el-col :xs="24" :md="sessionsCollapsed ? 1 : 6">
+        <div class="tech-panel sessions-panel" :class="{ collapsed: sessionsCollapsed }">
+          <div class="sessions-header">
+            <template v-if="!sessionsCollapsed">
+              <span class="tech-panel-title" style="margin-bottom: 0">历史会话</span>
+              <el-icon class="panel-toggle" title="向左收起" @click="toggleSessions"><DArrowLeft /></el-icon>
+            </template>
+            <el-icon v-else class="panel-toggle" title="展开历史会话" @click="toggleSessions"><DArrowRight /></el-icon>
           </div>
-          <el-empty v-if="!sessions.length" description="暂无会话" :image-size="50" />
+          <template v-if="!sessionsCollapsed">
+            <div v-for="s in sessions" :key="s.id" class="session-item" :class="{ active: s.id === currentSessionId }" @click="loadSession(s)">
+              <div class="session-main">
+                <div class="session-title" :title="s.title">{{ s.title }}</div>
+                <div class="session-time">{{ s.updateTime }}</div>
+              </div>
+              <el-icon class="session-delete" title="删除会话" @click.stop="handleDeleteSession(s)">
+                <Delete />
+              </el-icon>
+            </div>
+            <el-empty v-if="!sessions.length" description="暂无会话" :image-size="50" />
+          </template>
         </div>
       </el-col>
 
       <!-- 中间：对话 -->
-      <el-col :xs="24" :md="panelCollapsed ? 17 : 11">
+      <el-col :xs="24" :md="chatSpan">
         <div class="tech-panel chat-panel">
           <div class="chat-header">
             <span class="tech-panel-title">💬 对话式分析</span>
@@ -232,6 +240,18 @@ function togglePanel() {
     nextTick(() => rebuildCharts())
   }
 }
+
+// ===== 历史会话整栏收起/展开（向左收起） =====
+const sessionsCollapsed = ref(false)
+
+function toggleSessions() {
+  sessionsCollapsed.value = !sessionsCollapsed.value
+}
+
+// 对话区占宽 = 24 - 会话栏 - 执行链路栏（两栏收起时对话区最大化）
+const chatSpan = computed(
+  () => 24 - (sessionsCollapsed.value ? 1 : 6) - (panelCollapsed.value ? 1 : 7)
+)
 
 // ===== 步骤展开/收起 =====
 function toggleStep(step) {
@@ -496,6 +516,22 @@ onBeforeUnmount(() => disposeCharts())
 .sessions-panel {
   height: 100%;
   overflow-y: auto;
+}
+.sessions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.sessions-panel.collapsed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 14px 0;
+  overflow: hidden;
+}
+.sessions-panel.collapsed .sessions-header {
+  margin-bottom: 0;
 }
 .session-item {
   padding: 8px 10px;

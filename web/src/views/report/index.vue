@@ -22,7 +22,7 @@
       </el-tag>
     </div>
 
-    <el-row :gutter="16">
+    <el-row :gutter="16" class="report-row">
       <!-- 历史列表 -->
       <el-col :xs="24" :md="6">
         <div class="tech-panel history-panel">
@@ -341,15 +341,30 @@ onBeforeUnmount(() => {
   margin-left: 4px;
 }
 
+/* 页面撑满窗口高度（与 AI 分析助手一致），下方两栏等高、过长内部滚动 */
+.report-page {
+  height: calc(100vh - 92px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.report-row {
+  flex: 1;
+  min-height: 0;
+}
+/* 关键：列也要有确定高度，否则卡片 height:100% 解析失败、内容把页面撑开 */
+.report-row :deep(.el-col) {
+  height: 100%;
+}
 .history-panel {
-  max-height: calc(100vh - 200px);
+  height: 100%;
   overflow-y: auto;
 }
 .report-item {
-  padding: 10px 12px;
+  padding: 13px 14px;
   border-radius: 8px;
   cursor: pointer;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
   border: 1px solid transparent;
   transition: all 0.2s;
 }
@@ -364,15 +379,17 @@ onBeforeUnmount(() => {
   font-size: 13px;
   color: #1f2d3d;
   font-weight: 500;
+  line-height: 1.5;
 }
 .report-item-meta {
-  margin-top: 4px;
+  margin-top: 6px;
   font-size: 12px;
   color: #98a4b3;
 }
 
 .report-paper {
-  min-height: 400px;
+  height: 100%;
+  overflow-y: auto;
 }
 .report-toolbar {
   display: flex;

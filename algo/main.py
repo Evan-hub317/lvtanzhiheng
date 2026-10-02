@@ -518,7 +518,7 @@ def fallback_answer(question: str) -> str:
 
 
 SYSTEM_PROMPT = (
-    "你是'绿碳智衡'区域碳排放监测与仿真决策平台的 AI 碳管家，"
+    "你是'绿碳智衡'区域碳排放监测与仿真决策平台的 AI 知识库，"
     "依据给定的政策知识片段回答用户问题。要求：\n"
     "1. 仅依据片段内容作答，不得编造事实；\n"
     "2. 回答末尾标注引用来源（格式：【来源：《文件名》分块N】）；\n"
@@ -626,10 +626,11 @@ def _chat_stream(req: ChatReq):
         yield _sse({"content": f"（AI 服务调用异常：{type(e).__name__}）{fallback_answer(question)}"})
 
     # ---- 引用过滤：仅保留回答中实际引用的分块，与问题无关的检索片段不再列出 ----
-    # 模型被要求按【来源：《文件名》分块N】格式引用；未引用的分块视为与回答无关
+    # 模型被要求按【来源：《文件名》分块N】格式引用；未引用的分块视为与回答无关。
+    # 注意必须“文档名 AND 分块号”同时出现才算引用：仅文档名命中会把同文档的其他分块误放行
     if sources and stream_ok:
         cited = [s for s in sources
-                 if s["doc_name"] in answer_text or f"分块{s['chunk_index']}" in answer_text]
+                 if s["doc_name"] in answer_text and f"分块{s['chunk_index']}" in answer_text]
         if cited or "未收录" in answer_text or "暂未" in answer_text:
             if len(cited) != len(sources):
                 sources = cited

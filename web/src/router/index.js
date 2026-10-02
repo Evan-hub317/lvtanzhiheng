@@ -54,7 +54,7 @@ const routes = [
         path: 'ai-chat',
         name: 'AiChat',
         component: () => import('@/views/ai-chat/index.vue'),
-        meta: { title: 'AI 碳管家', icon: 'ChatDotRound' }
+        meta: { title: 'AI 知识库', icon: 'ChatDotRound' }
       },
       {
         path: 'agent',
