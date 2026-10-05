@@ -1,0 +1,4 @@
+# 密钥与本地配置（含真实 API Key，勿提交）
+.env
+__pycache__/
+*.pyc

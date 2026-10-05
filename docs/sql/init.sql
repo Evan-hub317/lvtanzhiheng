@@ -385,5 +385,5 @@ INSERT IGNORE INTO alert_rule (id, rule_name, rule_type, dimension, dimension_id
 -- 预设情景（基准/低碳/强化低碳，参数可在仿真器中调整；1.5 为历史隐含能效下降率）
 INSERT IGNORE INTO scenario_record (id, scenario_name, region_id, preset_type, coal_ratio, industry_ratio, tech_efficiency) VALUES
 (1, '基准情景',     1, 1, 58.0000, 42.0000, 1.5000),
-(2, '低碳情景',     1, 2, 48.0000, 36.0000, 3.0000),
-(3, '强化低碳情景', 1, 3, 38.0000, 30.0000, 4.5000);
+(2, '低碳情景',     1, 2, 54.5000, 40.3000, 2.5000),
+(3, '强化低碳情景', 1, 3, 49.3000, 38.6000, 3.5000);

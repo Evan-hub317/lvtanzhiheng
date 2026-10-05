@@ -62,7 +62,6 @@
     <div class="chat-main">
       <div class="chat-header">
         <div class="chat-header-title">
-          <span class="bot-icon">🌿</span>
           <div>
             <div class="bot-name">AI 知识库</div>
             <div class="bot-desc">基于政策知识库的检索增强问答（RAG）</div>
@@ -173,7 +172,7 @@ const quickQuestions = ['碳达峰和碳中和有什么区别？', '碳排放核
 
 // AI 回答为 Markdown 文本，转 HTML 渲染（加粗/列表/标题等）
 function renderMd(content) {
-  return content ? marked.parse(content) : ''
+  return content ? marked.parse(content, { breaks: true, gfm: true }) : ''
 }
 
 // ===== 会话 =====
@@ -965,14 +964,20 @@ onBeforeUnmount(() => {
 }
 
 /* Markdown 渲染样式（与 AI 分析助手一致） */
+/* 关键：覆盖气泡继承的 pre-wrap——否则 marked 输出 HTML 源码中的换行会被原样渲染成可见空行 */
+.md-body {
+  white-space: normal;
+}
+/* 段落上下边距 ≈ 一行行高（14px × 1.7 ≈ 24px）：
+   \n\n 的段落分隔在视觉上等于一个空行；单个 \n 的 <br> 仍是普通换行 */
 .md-body :deep(p) {
-  margin: 4px 0;
+  margin: 8px 0;
 }
 .md-body :deep(h1),
 .md-body :deep(h2),
 .md-body :deep(h3) {
   font-size: 15px;
-  margin: 10px 0 6px;
+  margin: 18px 0 8px;
   color: #0b84bb;
 }
 .md-body :deep(ul),

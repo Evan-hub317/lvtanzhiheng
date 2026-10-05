@@ -4,12 +4,22 @@ server:
 spring:
   application:
     name: smart-carbon
+  config:
+    # 导入本地密钥配置（application-secret.yml 不入库；optional 表示缺失也能启动）
+    import: optional:classpath:application-secret.yml
+  ai:
+    deepseek:
+      base-url: https://api.deepseek.com
+      api-key: ""
+      chat:
+        options:
+          model: deepseek-flash
   servlet:
     multipart:
       # 知识库文档上传限制（扫描版 PDF 体积较大）
       max-file-size: 20MB
       max-request-size: 20MB
-  # 数据库：先执行 docs/sql/init.sql，再按本机修改用户名密码
+  # 数据库：先执行数据库初始化脚本（init.sql），再按本机修改用户名密码
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://localhost:3306/smart_carbon?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
@@ -43,11 +53,6 @@ sa-token:
 # Python 算法服务地址（预测/仿真/异常检测/RAG）
 algo:
   base-url: http://localhost:8000
-
-# DeepSeek 大模型（AI 分析助手 Function Calling；Key 从系统环境变量读取）
-deepseek:
-  base-url: https://api.deepseek.com
-  api-key: ${DEEPSEEK_API_KEY:}
 
 # 应用配置
 app:

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-生成全国行政区划 + 省级参数 SQL 种子（docs/sql/regions_cn.sql）
+生成全国行政区划 + 省级参数 SQL 种子（regions_cn.sql）
 数据口径：
 - 行政区划名称/代码：GB/T 2260 标准（民政部公开口径）
 - 省级 GDP/二产占比/煤炭占比/能耗强度：国家统计局公开统计近似值（演示口径）
@@ -8,6 +8,7 @@
 - 市 GDP：按省 GDP 在省内确定性权重分配（万亿城市按公开排名加权），标注为近似值
 """
 import hashlib
+import os
 
 # ============ 省级数据 ============
 # code, name, gdp(亿元,2024近似), 二产占比%, 煤炭占比%, 能耗强度(吨标煤/万元), 电网, 供暖, 增速%
@@ -267,7 +268,8 @@ def build_sql():
 
 if __name__ == "__main__":
     sql = build_sql()
-    out_path = r"d:\develop\project\smart\docs\sql\regions_cn.sql"
+    # 输出到本脚本同目录（不与项目其他目录耦合）
+    out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "regions_cn.sql")
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(sql)
     # 统计

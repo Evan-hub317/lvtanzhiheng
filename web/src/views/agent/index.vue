@@ -129,7 +129,7 @@ import { agentSessionListApi, agentSessionDetailApi, agentDeleteSessionApi } fro
 
 /** Markdown 渲染助手回复 */
 function renderMd(content) {
-  return content ? marked.parse(content) : ''
+  return content ? marked.parse(content, { breaks: true, gfm: true }) : ''
 }
 
 const messages = ref([])
@@ -630,15 +630,18 @@ onBeforeUnmount(() => disposeCharts())
   border-bottom-left-radius: 4px;
 }
 
+.md-body {
+  white-space: normal;
+}
 /* Markdown 渲染样式 */
 .md-body :deep(p) {
-  margin: 4px 0;
+  margin: 8px 0;
 }
 .md-body :deep(h1),
 .md-body :deep(h2),
 .md-body :deep(h3) {
   font-size: 15px;
-  margin: 10px 0 6px;
+  margin: 18px 0 8px;
   color: #0b84bb;
 }
 .md-body :deep(ul),

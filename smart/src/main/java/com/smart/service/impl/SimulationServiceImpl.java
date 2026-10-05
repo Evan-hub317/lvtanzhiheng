@@ -205,7 +205,7 @@ public class SimulationServiceImpl implements SimulationService {
         vo.setValues(data.getJSONArray("values").toList(BigDecimal.class));
         vo.setLower(data.getJSONArray("lower").toList(BigDecimal.class));
         vo.setUpper(data.getJSONArray("upper").toList(BigDecimal.class));
-        detectPeak(vo.getYears(), vo.getValues(), vo);
+        detectPeakWithBase(vo.getBaseYear(), vo.getBaseEmission(), vo.getYears(), vo.getValues(), vo);
         return vo;
     }
 
@@ -372,6 +372,31 @@ public class SimulationServiceImpl implements SimulationService {
             }
         }
         if (peakIdx < values.size() - 1) {
+            BeanUtil.setProperty(target, "peakYear", years.get(peakIdx));
+            BeanUtil.setProperty(target, "peakValue", values.get(peakIdx));
+        }
+    }
+
+    /** 达峰识别（情景仿真专用）：基年实际值 + 预测序列一并取最大。
+     * 峰在基年（起点已低于去年且持续下降）→ 报基年（已达峰）；
+     * 峰在预测期且非最后一年 → 报预测年；最后一年最高 → 未达峰（不设置） */
+    private void detectPeakWithBase(int baseYear, BigDecimal baseEmission,
+                                    List<Integer> years, List<BigDecimal> values, Object target) {
+        if (values.isEmpty()) {
+            return;
+        }
+        int peakIdx = -1;   // -1 表示基年
+        BigDecimal peakVal = baseEmission;
+        for (int i = 0; i < values.size(); i++) {
+            if (values.get(i).compareTo(peakVal) > 0) {
+                peakIdx = i;
+                peakVal = values.get(i);
+            }
+        }
+        if (peakIdx == -1) {
+            BeanUtil.setProperty(target, "peakYear", baseYear);
+            BeanUtil.setProperty(target, "peakValue", baseEmission);
+        } else if (peakIdx < values.size() - 1) {
             BeanUtil.setProperty(target, "peakYear", years.get(peakIdx));
             BeanUtil.setProperty(target, "peakValue", values.get(peakIdx));
         }

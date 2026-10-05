@@ -61,7 +61,7 @@ public class CalcServiceImpl implements CalcService {
             factorMap.put(f.getEnergyId(), f);
         }
         if (factorMap.size() < 7) {
-            throw new BizException("排放因子库不完整（缺非电力能源因子），请执行 docs/sql/init.sql 与 migration_cn.sql");
+            throw new BizException("排放因子库不完整（缺非电力能源因子），请执行数据库初始化脚本 init.sql 与 migration_cn.sql");
         }
 
         long start = System.currentTimeMillis();

@@ -182,8 +182,8 @@ public class ReportServiceImpl implements ReportService {
             return item;
         }).collect(Collectors.toList()));
 
-        // 预警动态
-        Map<String, Object> alertSummary = alertService.summary();
+        // 预警动态（按报告所选区域口径：全国=全部，省/市=本级及下级）
+        Map<String, Object> alertSummary = alertService.summaryByRegion(dto.getRegionId());
         summary.put("alerts", alertSummary);
         return summary;
     }

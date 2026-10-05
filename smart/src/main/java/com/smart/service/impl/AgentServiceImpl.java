@@ -22,6 +22,7 @@ import com.smart.mapper.DimIndustryMapper;
 import com.smart.mapper.DimRegionMapper;
 import com.smart.mapper.FactEnergyMonthMapper;
 import com.smart.service.AgentService;
+import com.smart.service.AgentToolService;
 import com.smart.service.AnalysisService;
 import com.smart.service.AlertService;
 import com.smart.service.CalcService;
@@ -38,16 +39,33 @@ import com.smart.vo.StructureVO;
 import com.smart.vo.TrendVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.PromptTemplate;
+import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
+import org.springframework.ai.deepseek.DeepSeekChatOptions;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.method.MethodToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 /**
  * 对话式分析 Agent（LLM Function Calling 自主编排）
@@ -63,10 +81,8 @@ public class AgentServiceImpl implements AgentService {
     private static final int MAX_ROUNDS = 6;
     private static final int ANSWER_CHUNK = 30;
 
-    @Value("${deepseek.base-url:https://api.deepseek.com}")
-    private String deepseekBaseUrl;
-
-    @Value("${deepseek.api-key:}")
+    /** 仅用于启动前的配置检查；实际调用走 Spring AI DeepSeekChatModel（spring.ai.deepseek.*） */
+    @Value("${spring.ai.deepseek.api-key:}")
     private String deepseekApiKey;
 
     private final AnalysisService analysisService;
@@ -80,36 +96,38 @@ public class AgentServiceImpl implements AgentService {
     private final AlertRecordMapper alertRecordMapper;
     private final AgentSessionMapper sessionMapper;
     private final FactEnergyMonthMapper energyMonthMapper;
+    private final ResourceLoader resourceLoader;
+    private final ChatClient.Builder chatClientBuilder;
+    /** 14 个分析工具（@Tool 声明式注册，schema 由注解生成；执行仍在手工循环内逐轮调用） */
+    private final AgentToolService toolService;
+
+    /** ChatClient 懒构建（Builder 由 Spring AI 自动配置注入） */
+    private volatile ChatClient chatClient;
+
+    private ChatClient chatClient() {
+        if (chatClient == null) {
+            synchronized (this) {
+                if (chatClient == null) {
+                    chatClient = chatClientBuilder.build();
+                }
+            }
+        }
+        return chatClient;
+    }
 
     // ============ 系统提示词与工具注册 ============
+    // 提示词统一放在 resources/prompts/*.st，通过 Spring AI PromptTemplate 渲染（便于调整与复用）
 
-    private static final String SYSTEM_PROMPT = """
-            你是'绿碳智衡'平台的 AI 数据分析助手，通过调用工具获取真实数据回答用户问题。
-            要求：
-            1. 自主决定调用哪些工具及顺序，用最少步骤完成任务；
-            2. 区域参数使用中文名称（如"江苏"指江苏省、"全国"指全国口径）；
-            3. 工具返回的数据是真实核算数据，回答必须基于数据，不得编造；涉及未来年份数据时，必须先调用 predict_emission 获得预测（含趋势图），再基于预测值回答或判断；
-            4. 涉及阈值判断时调用 check_threshold 工具（用户未指定阈值时用平台默认规则）；
-            5. 每次收到新的用户问题后，你会先被要求输出分析计划（2-4 句话）；获得工具调用能力后，严格执行计划，基于工具数据作答；
-            6. 最终回答需包含：关键数据、判断结论、简短建议，300 字以内。
-            """;
-
-    /** 9 个工具定义（OpenAI function calling 格式） */
-    private static final String TOOLS_JSON = """
-            [{"type":"function","function":{"name":"query_kpi","description":"查询区域某年实际核算的核心指标（排放总量/同比/碳强度）；仅限已有核算数据的年份，未来年份请先调用 predict_emission","parameters":{"type":"object","properties":{"region":{"type":"string","description":"区域中文名，如：全国、江苏、南京"},"year":{"type":"integer","description":"年份，默认最近完整年"}},"required":["region"]}}},
-             {"type":"function","function":{"name":"query_trend","description":"查询区域历史年度排放趋势序列；仅限已有核算数据的年份，含未来年份请先调用 predict_emission","parameters":{"type":"object","properties":{"region":{"type":"string","description":"区域中文名"},"start_year":{"type":"integer"},"end_year":{"type":"integer"}},"required":["region"]}}},
-             {"type":"function","function":{"name":"query_structure","description":"查询区域某年行业排放结构","parameters":{"type":"object","properties":{"region":{"type":"string","description":"区域中文名"},"year":{"type":"integer"}},"required":["region"]}}},
-             {"type":"function","function":{"name":"run_calc","description":"重新执行碳核算（需先有活动数据），返回核算行数与校准报告","parameters":{"type":"object","properties":{}}}},
-             {"type":"function","function":{"name":"predict_emission","description":"LSTM 预测区域未来排放趋势（含达峰判断与置信区间）","parameters":{"type":"object","properties":{"region":{"type":"string","description":"区域中文名"}},"required":["region"]}}},
-             {"type":"function","function":{"name":"detect_anomaly","description":"孤立森林 AI 异常检测，返回检出异常点与统计","parameters":{"type":"object","properties":{}}}},
-             {"type":"function","function":{"name":"simulate_policy","description":"政策情景仿真：调整煤炭占比/工业占比/能效下降率，推演未来排放与达峰","parameters":{"type":"object","properties":{"region":{"type":"string","description":"区域中文名"},"coal_ratio":{"type":"number","description":"煤炭占比%"},"industry_ratio":{"type":"number","description":"工业占GDP比重%"},"tech_efficiency":{"type":"number","description":"单位能耗年均下降率%"}},"required":["region"]}}},
-             {"type":"function","function":{"name":"generate_report","description":"一键生成 AIGC 监测报告","parameters":{"type":"object","properties":{"region":{"type":"string","description":"区域中文名"},"period_type":{"type":"integer","description":"1月报 2年报"},"year":{"type":"integer"},"month":{"type":"integer","description":"月报必填"}},"required":["region","period_type","year"]}}},
-             {"type":"function","function":{"name":"check_threshold","description":"判断区域某年排放是否超过阈值（阈值未指定时用平台预警规则）","parameters":{"type":"object","properties":{"region":{"type":"string","description":"区域中文名"},"year":{"type":"integer","description":"判断年份（可为预测年）"},"threshold":{"type":"number","description":"自定义阈值（亿吨）"}},"required":["region","year"]}}},
-             {"type":"function","function":{"name":"query_energy_structure","description":"查询区域某年能源结构（返回各能源品种排放量与占比明细）","parameters":{"type":"object","properties":{"region":{"type":"string","description":"区域中文名"},"year":{"type":"integer"}},"required":["region"]}}},
-             {"type":"function","function":{"name":"query_region_ranking","description":"查询某年各市排放排行（返回各市排放量明细）；指定 region（省名）时返回该省下辖各市排行","parameters":{"type":"object","properties":{"region":{"type":"string","description":"省中文名（可选，不传为全国各市）"},"year":{"type":"integer","description":"年份，默认最近完整年"}}}}},
-             {"type":"function","function":{"name":"query_monthly_trend","description":"查询区域某年各月排放（返回各月数值明细，可分析季节规律）","parameters":{"type":"object","properties":{"region":{"type":"string","description":"区域中文名"},"year":{"type":"integer"}},"required":["region"]}}},
-             {"type":"function","function":{"name":"query_industry_trend","description":"查询区域某行业年度排放趋势（行业名如：电力生产、工业、建筑、交通、农业）","parameters":{"type":"object","properties":{"region":{"type":"string","description":"区域中文名"},"industry":{"type":"string","description":"行业中文名"},"start_year":{"type":"integer"},"end_year":{"type":"integer"}},"required":["region","industry"]}}},
-             {"type":"function","function":{"name":"query_alerts","description":"查询平台预警概况（待确认数、规则预警数、AI检测异常数、最近预警）","parameters":{"type":"object","properties":{}}}}]""";
+    /** 渲染提示词模板（显式 UTF-8，避免中文乱码） */
+    private String renderPrompt(String fileName, Map<String, Object> vars) {
+        try {
+            Resource resource = resourceLoader.getResource("classpath:prompts/" + fileName);
+            String template = resource.getContentAsString(StandardCharsets.UTF_8);
+            return new PromptTemplate(template).render(vars);
+        } catch (IOException e) {
+            throw new BizException("提示词模板加载失败：" + fileName);
+        }
+    }
 
     // ============ 会话管理 ============
 
@@ -153,9 +171,9 @@ public class AgentServiceImpl implements AgentService {
             }
 
             // 1. 消息初始化（同一会话加载历史上下文，最近 6 条）
-            // 注入当前日期：LLM 需据此正确理解"明年/今年/上月"等相对时间
+            // 模板内注入当前日期：LLM 需据此正确理解"明年/今年/上月"等相对时间
             messages.add(Map.of("role", "system", "content",
-                    "今天是" + java.time.LocalDate.now() + "。注意：涉及「明年」「今年」「上个月」等相对时间时，以此日期为基准换算。\n" + SYSTEM_PROMPT));
+                    renderPrompt("agent-system.st", Map.of("today", LocalDate.now()))));
             if (sessionId != null) {
                 AgentSession old = sessionMapper.selectById(sessionId);
                 if (old != null && StrUtil.isNotBlank(old.getMessagesJson())) {
@@ -163,7 +181,8 @@ public class AgentServiceImpl implements AgentService {
                     int from = Math.max(0, history.size() - 6);
                     for (int i = from; i < history.size(); i++) {
                         JSONObject m = history.getJSONObject(i);
-                        messages.add(Map.of("role", m.getStr("role", "user"), "content", m.getStr("content", "")));
+                        // 完整回放原始消息对象：思考模式要求 reasoning_content 等字段原样回传
+                        messages.add(m.toBean(Map.class));
                     }
                 }
             }
@@ -172,9 +191,7 @@ public class AgentServiceImpl implements AgentService {
             // 2. 阶段一：分析规划（独立指令副本，强制只输出计划，防止直接回答/污染上下文）
             try {
                 List<Map<String, Object>> planMessages = new ArrayList<>(messages);
-                planMessages.add(Map.of("role", "user", "content",
-                        "在调用工具之前，请仅输出你的分析计划（2-4 句话：说明对用户意图的理解与将执行的步骤）。"
-                                + "注意：不要回答用户问题，不要给出任何数据、数值或结论。"));
+                planMessages.add(Map.of("role", "user", "content", renderPrompt("agent-plan.st", Map.of())));
                 JSONObject planResp = callDeepSeek(planMessages, false);
                 if (planResp != null) {
                     String plan = planResp.getJSONArray("choices").getJSONObject(0)
@@ -188,7 +205,10 @@ public class AgentServiceImpl implements AgentService {
                         planStep.put("status", "done");
                         steps.add(planStep);
                         sendEvent(emitter, "step", Map.of("type", "plan", "content", plan));
-                        messages.add(Map.of("role", "assistant", "content", plan));
+                        // 完整保留模型返回的 message 对象：思考模式下 reasoning_content 必须原样回传，
+                        // 否则下一轮请求会被 API 拒绝
+                        messages.add(planResp.getJSONArray("choices").getJSONObject(0)
+                                .getJSONObject("message").toBean(Map.class));
                     } else {
                         log.warn("分析规划输出异常（长度 {}），已丢弃", plan == null ? 0 : plan.length());
                     }
@@ -259,8 +279,7 @@ public class AgentServiceImpl implements AgentService {
                 String core = "";
                 try {
                     List<Map<String, Object>> conclMessages = new ArrayList<>(messages);
-                    conclMessages.add(Map.of("role", "user", "content",
-                            "请用一句话（20 字以内）总结本次分析的核心结论，直接输出结论本身，不要 Markdown 标记、不要补充说明。"));
+                    conclMessages.add(Map.of("role", "user", "content", renderPrompt("agent-conclusion.st", Map.of())));
                     JSONObject conclResp = callDeepSeek(conclMessages, false);
                     if (conclResp != null) {
                         core = conclResp.getJSONArray("choices").getJSONObject(0)
@@ -309,26 +328,99 @@ public class AgentServiceImpl implements AgentService {
     // ============ DeepSeek 调用 ============
 
     private JSONObject callDeepSeek(List<Map<String, Object>> messages, boolean withTools) {
-        Map<String, Object> body = new HashMap<>();
-        body.put("model", "deepseek-chat");
-        body.put("messages", messages);
-        if (withTools) {
-            body.put("tools", JSONUtil.parseArray(TOOLS_JSON));
-        }
-        body.put("temperature", 0.3);
-        String url = deepseekBaseUrl + "/chat/completions";
         try {
-            String resp = HttpRequest.post(url)
-                    .headerMap(Map.of("Authorization", "Bearer " + deepseekApiKey,
-                            "Content-Type", "application/json"), true)
-                    .body(JSONUtil.toJsonStr(body))
-                    .timeout(120000)
-                    .execute().body();
-            return JSONUtil.parseObj(resp);
+            ChatResponse resp = chatClient()
+                    .prompt()
+                    .messages(toSpringMessages(messages))
+                    .options(buildOptions(withTools))
+                    .call()
+                    .chatResponse();
+            Message out = resp.getResult().getOutput();
+            if (out == null) {
+                log.error("大模型响应为空");
+                return null;
+            }
+            // 还原为 OpenAI 兼容 JSON（与旧实现同构）：上层解析、会话持久化零改动
+            JSONObject json = new JSONObject();
+            JSONObject msg = new JSONObject();
+            msg.set("role", "assistant");
+            msg.set("content", out.getText() == null ? "" : out.getText());
+            // 思考模式：reasoning_content 必须随消息原样回传（多轮硬约束），一并落库
+            if (out instanceof DeepSeekAssistantMessage dsMsg && StrUtil.isNotBlank(dsMsg.getReasoningContent())) {
+                msg.set("reasoning_content", dsMsg.getReasoningContent());
+            }
+            if (out instanceof AssistantMessage am && am.hasToolCalls()) {
+                JSONArray calls = new JSONArray();
+                for (AssistantMessage.ToolCall tc : am.getToolCalls()) {
+                    JSONObject fn = new JSONObject();
+                    fn.set("name", tc.name());
+                    fn.set("arguments", tc.arguments());
+                    calls.add(new JSONObject()
+                            .set("id", tc.id())
+                            .set("type", StrUtil.isBlank(tc.type()) ? "function" : tc.type())
+                            .set("function", fn));
+                }
+                msg.set("tool_calls", calls);
+            }
+            JSONArray choices = new JSONArray();
+            choices.add(new JSONObject().set("message", msg));
+            json.set("choices", choices);
+            return json;
         } catch (Exception e) {
-            log.error("DeepSeek 调用失败", e);
+            log.error("大模型调用失败", e);
             return null;
         }
+    }
+
+    /** 业务消息列表（Map，含 reasoning_content/tool_calls 原始结构）→ Spring AI Message */
+    private List<Message> toSpringMessages(List<Map<String, Object>> messages) {
+        List<Message> out = new ArrayList<>();
+        for (Map<String, Object> m : messages) {
+            String role = String.valueOf(m.get("role"));
+            String content = String.valueOf(m.getOrDefault("content", ""));
+            switch (role) {
+                case "system" -> out.add(new SystemMessage(content));
+                case "user" -> out.add(new UserMessage(content));
+                case "tool" -> out.add(new ToolResponseMessage(List.of(
+                        new ToolResponseMessage.ToolResponse(
+                                String.valueOf(m.getOrDefault("tool_call_id", "")), "", content))));
+                case "assistant" -> {
+                    String reasoning = m.get("reasoning_content") == null
+                            ? null : String.valueOf(m.get("reasoning_content"));
+                    List<AssistantMessage.ToolCall> calls = new ArrayList<>();
+                    if (m.get("tool_calls") instanceof JSONArray arr) {
+                        for (int i = 0; i < arr.size(); i++) {
+                            JSONObject c = arr.getJSONObject(i);
+                            JSONObject fn = c.getJSONObject("function");
+                            calls.add(new AssistantMessage.ToolCall(c.getStr("id"), c.getStr("type"),
+                                    fn.getStr("name"), fn.getStr("arguments")));
+                        }
+                    }
+                    if (calls.isEmpty()) {
+                        out.add(new DeepSeekAssistantMessage(content, reasoning));
+                    } else {
+                        out.add(new DeepSeekAssistantMessage(content, reasoning, Map.of(), calls));
+                    }
+                }
+                default -> log.warn("未知消息角色被跳过: {}", role);
+            }
+        }
+        return out;
+    }
+
+    private DeepSeekChatOptions buildOptions(boolean withTools) {
+        DeepSeekChatOptions.Builder b = DeepSeekChatOptions.builder().temperature(0.3);
+        if (withTools) {
+            b.toolCallbacks(buildToolCallbacks());
+        }
+        // 关键：关闭框架内部工具执行——工具由业务层手工执行并逐轮推送 SSE 事件（执行链路可视化）
+        b.internalToolExecutionEnabled(false);
+        return b.build();
+    }
+
+    /** 工具回调由 AgentToolService 的 @Tool 注解生成（schema 唯一来源），执行仍在业务层手工完成 */
+    private List<ToolCallback> buildToolCallbacks() {
+        return List.of(MethodToolCallbackProvider.builder().toolObjects(toolService).build().getToolCallbacks());
     }
 
     // ============ 9 个工具 ============
@@ -337,418 +429,52 @@ public class AgentServiceImpl implements AgentService {
     private Map<String, Object> executeTool(String name, Map<String, Object> args) {
         switch (name) {
             case "query_kpi" -> {
-                int regionId = resolveRegionId(args.get("region"));
-                int fullYear = latestFullYear();
-                int year = intArg(args, "year", fullYear);
-                if (year > fullYear) {
-                    // 未来年份：引导走独立的预测步骤（predict_emission）
-                    return Map.of("summary", year + " 年为未来年份，暂无核算数据；请先调用 predict_emission 工具获得预测值");
-                }
-                KpiVO kpi = analysisService.kpi(regionId, year);
-                if (kpi == null || kpi.getTotalEmission() == null) {
-                    return Map.of("summary", "暂无该区域核算数据");
-                }
-                String s = String.format("%d 年排放总量 %s 亿吨", kpi.getYear(),
-                        kpi.getTotalEmission().divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP));
-                if (kpi.getYoyRate() != null) {
-                    s += "，同比 " + kpi.getYoyRate() + "%";
-                }
-                if (kpi.getIntensity() != null) {
-                    s += "，碳强度 " + kpi.getIntensity() + " tCO2/万元";
-                }
-                return Map.of("summary", s);
+                return toolService.queryKpi(strArg(args, "region"), intArg(args, "year"));
             }
             case "query_trend" -> {
-                int regionId = resolveRegionId(args.get("region"));
-                int fullYear = latestFullYear();
-                int startYear = intArg(args, "start_year", 2021);
-                int endYear = intArg(args, "end_year", fullYear);
-                if (endYear > fullYear) {
-                    // 含未来年份：引导走独立的预测步骤（predict_emission 提供含未来段的图表）
-                    return Map.of("summary", endYear + " 年为未来年份，暂无核算数据；请先调用 predict_emission 工具获得含预测的完整趋势");
-                }
-                List<TrendVO> rows = analysisService.trend(regionId, startYear, endYear, null);
-                return trendResult(rows, "排放趋势");
+                return toolService.queryTrend(strArg(args, "region"), intArg(args, "start_year"), intArg(args, "end_year"));
             }
             case "query_structure" -> {
-                int regionId = resolveRegionId(args.get("region"));
-                int year = intArg(args, "year", latestFullYear());
-                List<StructureVO> rows = analysisService.structure(regionId, year);
-                return structureResult(rows, year + " 年行业结构");
+                return toolService.queryStructure(strArg(args, "region"), intArg(args, "year"));
             }
             case "run_calc" -> {
-                CalcResultVO result = calcService.execute(0, 0);
-                String s = String.format("核算完成：月度 %d 行，年度 %d 行，耗时 %ds", result.getMonthRows(),
-                        result.getYearRows(), result.getSeconds());
-                if (result.getCheckReport() != null) {
-                    s += "。" + result.getCheckReport().replace("\n", "；");
-                }
-                return Map.of("summary", s);
+                return toolService.runCalc();
             }
             case "predict_emission" -> {
-                int regionId = resolveRegionId(args.get("region"));
-                PredictVO p = simulationService.predict(regionId);
-                return predictResult(p);
+                return toolService.predictEmission(strArg(args, "region"));
             }
             case "detect_anomaly" -> {
-                Map<String, Object> r = alertService.runAnomalyDetection();
-                // Top 10 异常点（按分数降序）
-                List<AlertRecord> top = alertRecordMapper.selectList(new LambdaQueryWrapper<AlertRecord>()
-                        .eq(AlertRecord::getDetectType, 2)
-                        .orderByDesc(AlertRecord::getAnomalyScore)
-                        .last("LIMIT 10"));
-                List<String> names = new ArrayList<>();
-                List<Double> scores = new ArrayList<>();
-                for (AlertRecord rec : top) {
-                    DimRegion region = regionMapper.selectById(rec.getRegionId());
-                    String regionName = region == null ? "区域" + rec.getRegionId() : region.getRegionName();
-                    names.add(regionName + " " + rec.getYear() + "-" + rec.getMonth());
-                    scores.add(rec.getAnomalyScore() == null ? 0 : rec.getAnomalyScore().doubleValue());
-                }
-                Map<String, Object> result = new HashMap<>();
-                result.put("summary", String.format("检测完成：%d 个序列，检出异常 %d 个，入库 Top %d（耗时 %ds）",
-                        r.get("series"), r.get("anomalies"), r.get("saved"), r.get("seconds")));
-                if (!scores.isEmpty()) {
-                    result.put("chart", Map.of("type", "bar", "title", "AI 异常检测 Top 异常点（分数）",
-                            "x", names, "series", List.of(Map.of("name", "异常分数", "data", scores))));
-                }
-                return result;
+                return toolService.detectAnomaly();
             }
             case "simulate_policy" -> {
-                int regionId = resolveRegionId(args.get("region"));
-                SimulateDTO dto = new SimulateDTO();
-                dto.setRegionId(regionId);
-                // 未指定参数时取该区域基准参数（维持现状）
-                Map<String, Object> base = simulationService.baseParam(regionId);
-                dto.setCoalRatio(numArg(args, "coal_ratio", ((Number) base.get("coalRatio")).doubleValue()));
-                dto.setIndustryRatio(numArg(args, "industry_ratio", ((Number) base.get("industryRatio")).doubleValue()));
-                dto.setTechEfficiency(numArg(args, "tech_efficiency", 1.5));
-                dto.setYears(6);
-                SimResultVO sim = simulationService.simulate(dto);
-                Map<String, Object> result = new HashMap<>();
-                String s = String.format("仿真完成（煤 %.1f%% / 工业 %.1f%% / 能效 %.1f%%）",
-                        dto.getCoalRatio(), dto.getIndustryRatio(), dto.getTechEfficiency());
-                if (sim.getPeakYear() != null) {
-                    s += String.format("：%d 年达峰，峰值 %s 亿吨", sim.getPeakYear(),
-                            sim.getPeakValue().divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP));
-                } else {
-                    s += "：仿真期内未达峰";
-                }
-                result.put("summary", s);
-                result.put("chart", Map.of("type", "trend", "title", "政策仿真轨迹",
-                        "x", sim.getYears(),
-                        "series", List.of(Map.of("name", "仿真排放(亿吨)", "data",
-                                sim.getValues().stream().map(v -> v.divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP)).toList()))));
-                return result;
+                return toolService.simulatePolicy(strArg(args, "region"),
+                        dblArg(args, "coal_ratio"), dblArg(args, "industry_ratio"), dblArg(args, "tech_efficiency"));
             }
             case "generate_report" -> {
-                int regionId = resolveRegionId(args.get("region"));
-                ReportGenerateDTO dto = new ReportGenerateDTO();
-                dto.setRegionId(regionId);
-                dto.setPeriodType(intArg(args, "period_type", 2));
-                dto.setYear(intArg(args, "year", latestFullYear()));
-                dto.setMonth(args.get("month") != null ? intArg(args, "month", 1) : null);
-                ReportRecord record = reportService.generate(dto, null);
-                String brief = record.getContent() == null ? "" : record.getContent().substring(0, Math.min(200, record.getContent().length()));
-                return Map.of("summary", "报告已生成：《" + record.getTitle() + "》。摘要：" + brief);
+                return toolService.generateReport(strArg(args, "region"),
+                        intArg(args, "period_type"), intArg(args, "year"), intArg(args, "month"));
             }
             case "query_energy_structure" -> {
-                int regionId = resolveRegionId(args.get("region"));
-                int year = intArg(args, "year", latestFullYear());
-                List<EnergyStructureVO> rows = analysisService.energyStructure(regionId, year);
-                Map<String, Object> r = energyResult(rows, year + " 年能源结构（化石燃料直接排放）");
-                // 附注间接排放（电力/热力，展示口径，不计入总量）
-                List<EnergyStructureVO> indirect = analysisService.indirect(year);
-                if (indirect != null && !indirect.isEmpty()) {
-                    String indDesc = indirect.stream()
-                            .map(v -> v.getEnergyName() + " " + v.getEmission().divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP) + " 亿吨")
-                            .collect(java.util.stream.Collectors.joining("，"));
-                    r.put("summary", r.get("summary") + "；间接排放（不计入总量）：" + indDesc);
-                }
-                return r;
+                return toolService.queryEnergyStructure(strArg(args, "region"), intArg(args, "year"));
             }
             case "query_region_ranking" -> {
-                int year = intArg(args, "year", latestFullYear());
-                List<RegionRankVO> rows;
-                String scope;
-                if (args.get("region") != null) {
-                    int provinceId = resolveRegionId(args.get("region"));
-                    rows = analysisService.cityRankingByProvince(provinceId, year);
-                    scope = resolveName(args.get("region")) + " 各市";
-                } else {
-                    rows = analysisService.regionRanking(year);
-                    scope = "各市";
-                }
-                if (rows == null || rows.isEmpty()) {
-                    return Map.of("summary", "暂无数据");
-                }
-                String detail = rows.stream().limit(10)
-                        .map(r -> r.getRegionName() + " " + r.getEmission().divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP) + "亿吨")
-                        .collect(java.util.stream.Collectors.joining("，"));
-                Map<String, Object> result = new HashMap<>();
-                result.put("summary", year + " 年" + scope + "排放排行 Top10：" + detail);
-                result.put("chart", Map.of("type", "bar", "title", year + " 年" + scope + "排放排行",
-                        "x", rows.stream().limit(10).map(RegionRankVO::getRegionName).toList(),
-                        "series", List.of(Map.of("name", "排放(亿吨)", "data",
-                                rows.stream().limit(10).map(r -> r.getEmission().divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP)).toList()))));
-                return result;
+                return toolService.queryRegionRanking(strArg(args, "region"), intArg(args, "year"));
             }
             case "query_monthly_trend" -> {
-                int regionId = resolveRegionId(args.get("region"));
-                int year = intArg(args, "year", latestFullYear());
-                List<MonthlyVO> rows = analysisService.monthlyTrend(regionId, year, null, null);
-                if (rows == null || rows.isEmpty()) {
-                    return Map.of("summary", "暂无数据");
-                }
-                String detail = rows.stream()
-                        .map(r -> r.getMonth() + "月" + r.getEmission().divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP) + "亿吨")
-                        .collect(java.util.stream.Collectors.joining("，"));
-                Map<String, Object> result = new HashMap<>();
-                result.put("summary", year + " 年各月排放：" + detail);
-                result.put("chart", Map.of("type", "bar", "title", year + " 年各月排放",
-                        "x", rows.stream().map(r -> r.getMonth() + "月").toList(),
-                        "series", List.of(Map.of("name", "排放(亿吨)", "data",
-                                rows.stream().map(r -> r.getEmission().divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP)).toList()))));
-                return result;
+                return toolService.queryMonthlyTrend(strArg(args, "region"), intArg(args, "year"));
             }
             case "query_industry_trend" -> {
-                int regionId = resolveRegionId(args.get("region"));
-                int fullYear = latestFullYear();
-                int startYear = intArg(args, "start_year", 2021);
-                int endYear = intArg(args, "end_year", fullYear);
-                if (endYear > fullYear) {
-                    return Map.of("summary", endYear + " 年为未来年份，请先调用 predict_emission");
-                }
-                String industryName = String.valueOf(args.getOrDefault("industry", ""));
-                int industryId = resolveIndustryId(industryName);
-                List<TrendVO> rows = analysisService.industryTrend(regionId, startYear, endYear, industryId);
-                return trendResult(rows, industryName + " 行业排放趋势");
+                return toolService.queryIndustryTrend(strArg(args, "region"), strArg(args, "industry"),
+                        intArg(args, "start_year"), intArg(args, "end_year"));
             }
             case "query_alerts" -> {
-                Map<String, Object> summary = alertService.summary();
-                List<AlertRecord> top = alertRecordMapper.selectList(new LambdaQueryWrapper<AlertRecord>()
-                        .orderByDesc(AlertRecord::getCreateTime)
-                        .last("LIMIT 5"));
-                String topDesc = top.stream().map(r -> (r.getRuleName() == null ? "" : r.getRuleName()) + "（"
-                        + r.getYear() + (r.getMonth() == null ? "" : "-" + r.getMonth()) + "）")
-                        .collect(java.util.stream.Collectors.joining("，"));
-                return Map.of("summary", String.format("预警概况：待确认 %s 条，阈值规则预警 %s 条，AI 检测异常 %s 条；最近预警：%s",
-                        summary.get("pending"), summary.get("ruleCount"), summary.get("aiCount"),
-                        topDesc.isEmpty() ? "无" : topDesc));
+                return toolService.queryAlerts();
             }
             case "check_threshold" -> {
-                int regionId = resolveRegionId(args.get("region"));
-                int year = intArg(args, "year", latestFullYear());
-                // 目标年为未来/不完整年时使用预测值对比（如"明年会超标吗"）
-                boolean predicted = year > latestFullYear();
-                BigDecimal totalYi;
-                if (predicted) {
-                    PredictVO p = simulationService.predict(regionId);
-                    int idx = p.getYears().indexOf(year);
-                    if (idx < 0) {
-                        return Map.of("summary", year + " 年不在预测范围内（预测至 " +
-                                p.getYears().get(p.getYears().size() - 1) + " 年）");
-                    }
-                    totalYi = p.getValues().get(idx).divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP);
-                } else {
-                    List<TrendVO> rows = analysisService.trend(regionId, year, year, null);
-                    if (rows.isEmpty()) {
-                        return Map.of("summary", year + " 年暂无该区域数据");
-                    }
-                    totalYi = rows.get(0).getEmission().divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP);
-                }
-                // 阈值优先级：用户指定 > 区域默认基值（上一个完整年排放 × 1.05，允许 5% 年增长）
-                BigDecimal thresholdYi = null;
-                String thresholdSource = "";
-                if (args.get("threshold") != null) {
-                    thresholdYi = BigDecimal.valueOf(numArg(args, "threshold", 0));
-                    thresholdSource = "自定义";
-                } else {
-                    int baseYear = latestFullYear();
-                    List<TrendVO> baseRows = analysisService.trend(regionId, baseYear, baseYear, null);
-                    if (!baseRows.isEmpty() && baseRows.get(0).getEmission().signum() > 0) {
-                        thresholdYi = baseRows.get(0).getEmission()
-                                .multiply(BigDecimal.valueOf(1.05))
-                                .divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP);
-                        thresholdSource = "默认基值（" + baseYear + " 年 × 1.05）";
-                    }
-                }
-                if (thresholdYi == null) {
-                    return Map.of("summary", String.format("%d 年排放总量 %s 亿吨；该区域无历史数据可计算默认基值，请指定阈值后重新判断", year, totalYi));
-                }
-                boolean exceed = totalYi.compareTo(thresholdYi) > 0;
-                return Map.of("summary", String.format("%d 年排放%s %s 亿吨 vs 阈值%s %s 亿吨：%s%s", year,
-                        predicted ? "（预测值）" : "", totalYi,
-                        thresholdSource.isEmpty() ? "" : "（" + thresholdSource + "）", thresholdYi,
-                        exceed ? "超标" : "未超标", exceed ? " " + totalYi.subtract(thresholdYi) + " 亿吨" : ""));
+                return toolService.checkThreshold(strArg(args, "region"), intArg(args, "year"), dblArg(args, "threshold"));
             }
             default -> throw new BizException("未知工具：" + name);
         }
-    }
-
-    // ============ 工具结果组装（含图表指令） ============
-
-    private Map<String, Object> trendResult(List<TrendVO> rows, String title) {
-        Map<String, Object> result = new HashMap<>();
-        if (rows == null || rows.isEmpty()) {
-            result.put("summary", "暂无数据");
-            return result;
-        }
-        // summary 含全部年度数值（LLM 可据此回答细节问题，图表仅为可视化）
-        String detail = rows.stream()
-                .map(r -> r.getYear() + "年" + r.getEmission().divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP) + "亿吨")
-                .collect(java.util.stream.Collectors.joining("，"));
-        result.put("summary", title + "：" + detail);
-        result.put("chart", Map.of("type", "trend", "title", title,
-                "x", rows.stream().map(TrendVO::getYear).toList(),
-                "series", List.of(Map.of("name", "排放(亿吨)", "data",
-                        rows.stream().map(r -> r.getEmission().divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP)).toList()))));
-        return result;
-    }
-
-    private Map<String, Object> structureResult(List<StructureVO> rows, String title) {
-        Map<String, Object> result = new HashMap<>();
-        if (rows == null || rows.isEmpty()) {
-            result.put("summary", "暂无数据");
-            return result;
-        }
-        // summary 含各行业排放量与占比明细（LLM 可排序、对比、回答细节）
-        BigDecimal total = rows.stream().map(StructureVO::getEmission).reduce(BigDecimal.ZERO, BigDecimal::add);
-        String detail = rows.stream().map(r -> {
-            BigDecimal yi = r.getEmission().divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP);
-            BigDecimal pct = total.signum() > 0
-                    ? r.getEmission().multiply(BigDecimal.valueOf(100)).divide(total, 1, java.math.RoundingMode.HALF_UP)
-                    : BigDecimal.ZERO;
-            return r.getIndustryName() + " " + yi + " 亿吨（占 " + pct + "%）";
-        }).collect(java.util.stream.Collectors.joining("，"));
-        result.put("summary", title + "：" + detail);
-        result.put("chart", Map.of("type", "pie", "title", title,
-                "x", rows.stream().map(StructureVO::getIndustryName).toList(),
-                "series", List.of(Map.of("name", "排放(亿吨)", "data",
-                        rows.stream().map(r -> r.getEmission().divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP)).toList()))));
-        return result;
-    }
-
-    /** 能源结构结果（与行业结构同构：明细进 summary，图表供可视化） */
-    private Map<String, Object> energyResult(List<EnergyStructureVO> rows, String title) {
-        Map<String, Object> result = new HashMap<>();
-        if (rows == null || rows.isEmpty()) {
-            result.put("summary", "暂无数据");
-            return result;
-        }
-        BigDecimal total = rows.stream().map(EnergyStructureVO::getEmission).reduce(BigDecimal.ZERO, BigDecimal::add);
-        String detail = rows.stream().map(r -> {
-            BigDecimal yi = r.getEmission().divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP);
-            BigDecimal pct = total.signum() > 0
-                    ? r.getEmission().multiply(BigDecimal.valueOf(100)).divide(total, 1, java.math.RoundingMode.HALF_UP)
-                    : BigDecimal.ZERO;
-            return r.getEnergyName() + " " + yi + " 亿吨（占 " + pct + "%）";
-        }).collect(java.util.stream.Collectors.joining("，"));
-        result.put("summary", title + "：" + detail);
-        result.put("chart", Map.of("type", "pie", "title", title,
-                "x", rows.stream().map(EnergyStructureVO::getEnergyName).toList(),
-                "series", List.of(Map.of("name", "排放(亿吨)", "data",
-                        rows.stream().map(r -> r.getEmission().divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP)).toList()))));
-        return result;
-    }
-
-    private Map<String, Object> predictResult(PredictVO p) {
-        Map<String, Object> result = new HashMap<>();
-        String s = String.format("预测模型：%s；", "lstm".equals(p.getMethod()) ? "LSTM" : "趋势模型");
-        if (p.getPeakYear() != null) {
-            s += String.format("%d 年达峰（峰值 %s 亿吨）；", p.getPeakYear(),
-                    p.getPeakValue().divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP));
-        } else {
-            s += "预测期内未达峰；";
-        }
-        // 逐年明细（LLM 可回答任意年份）
-        for (int i = 0; i < p.getYears().size(); i++) {
-            s += p.getYears().get(i) + "年" + p.getValues().get(i)
-                    .divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP) + "亿吨";
-            if (i < p.getYears().size() - 1) {
-                s += "，";
-            }
-        }
-        result.put("summary", s);
-        // 历史 + 预测合并为一条趋势
-        List<Integer> x = new ArrayList<>(p.getHistoryYears());
-        x.addAll(p.getYears());
-        List<BigDecimal> vals = new ArrayList<>(p.getHistoryValues());
-        vals.addAll(p.getValues());
-        result.put("chart", Map.of("type", "trend", "title", "排放预测（历史+未来）",
-                "x", x,
-                "series", List.of(Map.of("name", "排放(亿吨)", "data",
-                        vals.stream().map(v -> v.divide(BigDecimal.valueOf(1e8), 2, java.math.RoundingMode.HALF_UP)).toList()))));
-        return result;
-    }
-
-    // ============ 辅助 ============
-
-    private int latestFullYear() {
-        try {
-            // 完整年：数据最晚年若不足 12 个月则回退上一年
-            com.smart.vo.DataStatusVO status = energyMonthMapper.selectStatus();
-            if (status == null || status.getMinYear() == null) {
-                return 2025;
-            }
-            int year = status.getMaxYear();
-            if (energyMonthMapper.selectMaxMonth(year) < 12 && year > 2021) {
-                year -= 1;
-            }
-            return year;
-        } catch (Exception e) {
-            return 2025;
-        }
-    }
-
-    private int resolveIndustryId(String name) {
-        List<DimIndustry> list = industryMapper.selectList(new LambdaQueryWrapper<DimIndustry>()
-                .likeRight(DimIndustry::getIndustryName, name.replace("行业", "").trim()).last("LIMIT 1"));
-        if (list.isEmpty()) {
-            list = industryMapper.selectList(new LambdaQueryWrapper<DimIndustry>()
-                    .like(DimIndustry::getIndustryName, name.trim()).last("LIMIT 1"));
-        }
-        if (list.isEmpty()) {
-            throw new BizException("未找到行业：" + name + "（可选：电力生产、工业、建筑、交通、农业）");
-        }
-        return list.get(0).getId();
-    }
-
-    private String resolveName(Object region) {
-        String name = String.valueOf(region).trim();
-        DimRegion r = regionMapper.selectOne(new LambdaQueryWrapper<DimRegion>()
-                .eq(DimRegion::getRegionName, name).last("LIMIT 1"));
-        if (r == null) {
-            r = regionMapper.selectOne(new LambdaQueryWrapper<DimRegion>()
-                    .likeRight(DimRegion::getRegionName, name).last("LIMIT 1"));
-        }
-        return r == null ? name : r.getRegionName();
-    }
-
-    private int resolveRegionId(Object region) {
-        String name = region == null ? "" : String.valueOf(region).trim();
-        if (StrUtil.isBlank(name) || "全国".equals(name)) {
-            return 1;
-        }
-        // 依次尝试：精确名、补"省/市"后缀、前缀模糊（简称如"江苏"→"江苏省"）
-        DimRegion r = regionMapper.selectOne(new LambdaQueryWrapper<DimRegion>()
-                .eq(DimRegion::getRegionName, name).last("LIMIT 1"));
-        if (r == null) {
-            r = regionMapper.selectOne(new LambdaQueryWrapper<DimRegion>()
-                    .eq(DimRegion::getRegionName, name + "省").last("LIMIT 1"));
-        }
-        if (r == null) {
-            r = regionMapper.selectOne(new LambdaQueryWrapper<DimRegion>()
-                    .eq(DimRegion::getRegionName, name + "市").last("LIMIT 1"));
-        }
-        if (r == null) {
-            r = regionMapper.selectOne(new LambdaQueryWrapper<DimRegion>()
-                    .likeRight(DimRegion::getRegionName, name).last("LIMIT 1"));
-        }
-        if (r == null) {
-            throw new BizException("未找到区域：" + name + "（请使用全称，如：江苏省、南京市）");
-        }
-        return r.getId();
     }
 
     private Map<String, Object> parseArgs(String arguments) {
@@ -762,14 +488,19 @@ public class AgentServiceImpl implements AgentService {
         }
     }
 
-    private int intArg(Map<String, Object> args, String key, int def) {
+    private String strArg(Map<String, Object> args, String key) {
         Object v = args.get(key);
-        return v == null ? def : Integer.parseInt(String.valueOf(v));
+        return v == null ? null : String.valueOf(v);
     }
 
-    private double numArg(Map<String, Object> args, String key, double def) {
+    private Integer intArg(Map<String, Object> args, String key) {
         Object v = args.get(key);
-        return v == null ? def : Double.parseDouble(String.valueOf(v));
+        return v == null ? null : Integer.parseInt(String.valueOf(v));
+    }
+
+    private Double dblArg(Map<String, Object> args, String key) {
+        Object v = args.get(key);
+        return v == null ? null : Double.parseDouble(String.valueOf(v));
     }
 
     private void sendEvent(SseEmitter emitter, String event, Map<String, Object> data) {

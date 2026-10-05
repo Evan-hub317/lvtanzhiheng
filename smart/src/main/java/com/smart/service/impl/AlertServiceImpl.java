@@ -10,9 +10,11 @@ import com.smart.common.BizException;
 import com.smart.entity.AlertRecord;
 import com.smart.entity.AlertRule;
 import com.smart.entity.DimEnergy;
+import com.smart.entity.DimRegion;
 import com.smart.mapper.AlertRecordMapper;
 import com.smart.mapper.AlertRuleMapper;
 import com.smart.mapper.DimEnergyMapper;
+import com.smart.mapper.DimRegionMapper;
 import com.smart.mapper.FactEmissionMonthMapper;
 import com.smart.service.AlertService;
 import com.smart.vo.AlertPageVO;
@@ -51,6 +53,7 @@ public class AlertServiceImpl implements AlertService {
     private final AlertRecordMapper recordMapper;
     private final FactEmissionMonthMapper monthMapper;
     private final DimEnergyMapper energyMapper;
+    private final DimRegionMapper regionMapper;
     private final AlgoClient algoClient;
 
     /**
@@ -254,14 +257,38 @@ public class AlertServiceImpl implements AlertService {
 
     @Override
     public Map<String, Object> summary() {
+        return countSummary(null);
+    }
+
+    @Override
+    public Map<String, Object> summaryByRegion(Integer regionId) {
+        return countSummary(regionId);
+    }
+
+    /** 按区域口径统计：null/1=全国不限；省/市包含本级及下级区域 */
+    private Map<String, Object> countSummary(Integer regionId) {
+        List<Integer> regionIds = null;
+        if (regionId != null && regionId > 1) {
+            regionIds = new ArrayList<>();
+            regionIds.add(regionId);
+            for (DimRegion child : regionMapper.selectList(
+                    new LambdaQueryWrapper<DimRegion>().eq(DimRegion::getParentId, regionId))) {
+                regionIds.add(child.getId());
+            }
+        }
         Map<String, Object> result = new HashMap<>();
-        result.put("pending", recordMapper.selectCount(new LambdaQueryWrapper<AlertRecord>()
+        result.put("pending", recordMapper.selectCount(regionWrapper(regionIds)
                 .eq(AlertRecord::getStatus, 0)));
-        result.put("ruleCount", recordMapper.selectCount(new LambdaQueryWrapper<AlertRecord>()
+        result.put("ruleCount", recordMapper.selectCount(regionWrapper(regionIds)
                 .eq(AlertRecord::getDetectType, 1)));
-        result.put("aiCount", recordMapper.selectCount(new LambdaQueryWrapper<AlertRecord>()
+        result.put("aiCount", recordMapper.selectCount(regionWrapper(regionIds)
                 .eq(AlertRecord::getDetectType, 2)));
         return result;
+    }
+
+    private LambdaQueryWrapper<AlertRecord> regionWrapper(List<Integer> regionIds) {
+        return new LambdaQueryWrapper<AlertRecord>()
+                .in(regionIds != null, AlertRecord::getRegionId, regionIds);
     }
 
     private boolean existsRecord(Integer ruleId, int regionId, int industryId, Integer year, Integer month) {

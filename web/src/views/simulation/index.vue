@@ -145,10 +145,12 @@ const regionId = ref(1)
 const regionName = computed(() => regions.value.find(r => r.id === regionId.value)?.regionName || '全国')
 
 // 预设情景 = 相对所选区域基准参数的偏移（基准参数来自该省实际煤炭/二产占比）
+// 数值校准自现实政策节奏：煤炭占比 5 年降 2-3pp（×0.94-0.85）、
+// 二产占比 5 年降 1-3pp（×0.96-0.92）、能效年下降率 2.5%-3.5%（十四五平均约 2.9%）
 const presets = [
   { value: 1, label: '基准情景（维持现状）', coalMul: 1.0, indMul: 1.0, tech: 1.5 },
-  { value: 2, label: '低碳情景（能源转型）', coalMul: 0.8, indMul: 0.85, tech: 3.0 },
-  { value: 3, label: '强化低碳情景（深度减排）', coalMul: 0.65, indMul: 0.7, tech: 4.5 },
+  { value: 2, label: '低碳情景（能源转型）', coalMul: 0.94, indMul: 0.96, tech: 2.5 },
+  { value: 3, label: '强化低碳情景（深度减排）', coalMul: 0.85, indMul: 0.92, tech: 3.5 },
   { value: 0, label: '自定义情景', coalMul: 1.0, indMul: 1.0, tech: 2.0 }
 ]
 const preset = ref(1)
@@ -464,6 +466,8 @@ async function loadPredict() {
 
 async function onRegionChange() {
   checkedScenarios.value = []
+  // 切换区域后滑杆回到该区域基准值（基准情景），预设选择同步重置，避免下拉框与图不一致
+  preset.value = 1
   await loadBaseParam()
   await loadPredict()
   await loadScenarios()

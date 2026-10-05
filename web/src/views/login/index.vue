@@ -9,7 +9,7 @@
     <!-- 玻璃拟态登录卡片 -->
     <div class="login-card">
       <div class="brand">
-        <div class="brand-icon">🌿</div>
+        <img class="brand-icon" src="/favicon.ico" alt="logo" />
         <h1 class="brand-title tech-gradient-text">绿碳智衡</h1>
         <p class="brand-sub">区域碳排放大数据监测与仿真决策平台</p>
       </div>
@@ -181,7 +181,8 @@ async function handleLogin() {
   margin-bottom: 32px;
 }
 .brand-icon {
-  font-size: 44px;
+  width: 56px;
+  height: 56px;
   filter: drop-shadow(0 0 14px rgba(16, 185, 129, 0.6));
 }
 .brand-title {

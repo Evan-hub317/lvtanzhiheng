@@ -31,3 +31,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### 本地密钥（勿提交）###
+src/main/resources/application-secret.yml

@@ -39,7 +39,8 @@ os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "30")
 
 
 def _load_env_file(path=".env"):
-    """加载 algo 目录下的 .env 文件（key=value 每行）；已存在的环境变量优先"""
+    """加载 algo 目录下的 .env 文件（key=value 每行）。
+    .env 为项目级配置文件，直接覆盖同名系统环境变量（配置以本文件为准）"""
     try:
         env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), path)
         with open(env_path, encoding="utf-8") as f:
@@ -48,7 +49,7 @@ def _load_env_file(path=".env"):
                 if not line or line.startswith("#") or "=" not in line:
                     continue
                 k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip())
+                os.environ[k.strip()] = v.strip()
     except FileNotFoundError:
         pass
 
@@ -57,6 +58,7 @@ _load_env_file()
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-flash")
 
 # 情景仿真基准参数（与数据库预设情景一致：基准情景）
 BASE_COAL = 58.0      # 基准煤炭占比 %
@@ -322,20 +324,25 @@ def _calibrate_growth(history, fallback_gdp):
 
 
 def _trajectory(base_emission, years, hist_growth, coal, ind, tech, base_coal, base_ind):
-    """历史增速校准 + 政策修正（修正基准可省级化）：
-    - 结构性调整（煤炭/工业占比）→ 排放水平的一次性修正，按 3 年渐进生效（幂弹性 0.5）
-    - 能效下降率 → 对增速的持续性修正（弹性 2.0，1.5 为历史隐含水平）
-    - 情景参数 = 基准参数（各省实际值）时所有修正为 1，曲线即该省历史趋势外推"""
+    """逐年动态推演：政策效应随时间逐渐深化（体现"政策逐年加码"，减排力度逐年加大）。
+    - 年增速从基准增速 g_base 逐年走向政策完全生效后的长期增速 g_long，
+      深化曲线为 w=((i+1)/n)^1.5（政策中期发力）：前期贴近基准、后期政策力度逐年加大，
+      增速在预测期内由正转负 → 产生随政策强度移动的真实达峰年（而非恒定增速的端点峰值）
+    - g_long = 基准增速 × 结构水平修正（煤炭/工业占比相对基准，幂弹性 0.5）
+               × 能效修正（相对历史隐含 1.5% 的超额下降率，弹性 2.0）
+    - 情景参数 = 基准参数（各省实际值）时 g_long == g_base，曲线即该省历史趋势外推（与旧模型一致）"""
     coal_level = (coal / base_coal) ** 0.5 if coal > 0 and base_coal > 0 else 0.0
     ind_level = (ind / base_ind) ** 0.5 if ind > 0 and base_ind > 0 else 0.0
-    level_effect = coal_level * ind_level          # 一次性结构水平修正（基准=1）
-    tech_effect = 1.0 - (tech - BASE_TECH) / 100.0 * 2.0   # 持续性能效修正（基准=1）
-    growth = max((1.0 + hist_growth) * tech_effect, 0.90)
+    level_effect = coal_level * ind_level          # 结构水平修正（基准=1）
+    g_base = 1.0 + hist_growth                     # 基准年增速（无政策修正）
+    g_long = g_base * level_effect * (1.0 - (tech - BASE_TECH) / 100.0 * 2.0)  # 政策完全生效后的年增速
+
     out, e = [], base_emission
-    for i, _ in enumerate(years):
-        # 结构修正分 3 年渐进生效（避免"当年骤变"，达峰年份更自然）
-        adj = level_effect ** (1.0 / 3.0) if i < 3 else 1.0
-        e *= growth * adj
+    n = len(years)
+    for i in range(n):
+        w = ((i + 1) / n) ** 1.5                   # 政策深化进度（1.5 次幂：政策中期发力）
+        growth = max(g_base + (g_long - g_base) * w, 0.90)
+        e *= growth
         out.append(e)
     return np.asarray(out)
 
@@ -362,15 +369,23 @@ def simulate(req: SimulateReq):
 
     lower = np.percentile(paths, 2.5, axis=0)
     upper = np.percentile(paths, 97.5, axis=0)
-    peak_idx = int(np.argmax(central))
-    peaked = peak_idx < len(years) - 1
+    # 达峰判定：基年实际值 + 预测序列一并取最大。
+    # 峰在基年（起点已低于去年且持续下降）→ 报基年（已达峰）；最后一年最高 → 未达峰
+    full = np.concatenate([[req.base_emission], central])
+    peak_idx = int(np.argmax(full))
+    if peak_idx == 0:
+        peak_year, peak_value = req.base_year, round(float(full[0]), 2)
+    elif peak_idx < len(full) - 1:
+        peak_year, peak_value = years[peak_idx - 1], round(float(central[peak_idx - 1]), 2)
+    else:
+        peak_year, peak_value = None, None
     return {"code": 200, "data": {
         "years": years,
         "values": [round(float(v), 2) for v in central],
         "lower": [round(float(v), 2) for v in lower],
         "upper": [round(float(v), 2) for v in upper],
-        "peak_year": years[peak_idx] if peaked else None,
-        "peak_value": round(float(central[peak_idx]), 2) if peaked else None,
+        "peak_year": peak_year,
+        "peak_value": peak_value,
     }}
 
 
@@ -521,9 +536,11 @@ SYSTEM_PROMPT = (
     "你是'绿碳智衡'区域碳排放监测与仿真决策平台的 AI 知识库，"
     "依据给定的政策知识片段回答用户问题。要求：\n"
     "1. 仅依据片段内容作答，不得编造事实；\n"
-    "2. 回答末尾标注引用来源（格式：【来源：《文件名》分块N】）；\n"
+    "2. 正文中不在句子后面插入任何引用标注；整个回答的最后一行统一列出所有引用来源，"
+    "每行一条（格式：【来源：《文件名》分块N】）；\n"
     "3. 若片段无法回答，直接说明'知识库中暂未收录该内容'；\n"
-    "4. 语言简洁专业，适合政府工作人员阅读。"
+    "4. 语言简洁专业，适合政府工作人员阅读；\n"
+    "5. 使用 Markdown 格式输出；\n"
 )
 
 
@@ -602,7 +619,7 @@ def _chat_stream(req: ChatReq):
             with client.stream(
                 "POST", f"{DEEPSEEK_BASE_URL}/chat/completions",
                 headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
-                json={"model": "deepseek-chat", "messages": messages,
+                json={"model": DEEPSEEK_MODEL, "messages": messages,
                       "stream": True, "temperature": 0.3},
             ) as resp:
                 if resp.status_code != 200:
@@ -617,13 +634,27 @@ def _chat_stream(req: ChatReq):
                         payload = line[5:].strip()
                         if payload == "[DONE]":
                             break
-                        delta = json.loads(payload)["choices"][0]["delta"].get("content", "")
+                        # 兼容不同代理/模型的 SSE 事件：容忍 choices 为空、
+                        # 仅含 usage 等非内容事件，逐行解析失败只跳过、不中断整段回答
+                        try:
+                            data_obj = json.loads(payload)
+                            choices = data_obj.get("choices") or []
+                            if not choices:
+                                print("[algo] 跳过无内容 SSE 事件:", payload[:200])
+                                continue
+                            delta_obj = choices[0].get("delta") or {}
+                            delta = delta_obj.get("content", "") if isinstance(delta_obj, dict) else ""
+                        except (ValueError, KeyError, IndexError, TypeError):
+                            print("[algo] 跳过无法解析的 SSE 事件:", payload[:200])
+                            continue
                         if delta:
                             answer_text += delta
                             yield _sse({"content": delta})
     except Exception as e:
         print("[algo] DeepSeek 调用失败:", e)
-        yield _sse({"content": f"（AI 服务调用异常：{type(e).__name__}）{fallback_answer(question)}"})
+        # 已有完整回答时不再追加兜底话术（连接中断/尾部事件异常不应污染已生成的内容）
+        if not answer_text:
+            yield _sse({"content": f"（AI 服务调用异常：{type(e).__name__}）{fallback_answer(question)}"})
 
     # ---- 引用过滤：仅保留回答中实际引用的分块，与问题无关的检索片段不再列出 ----
     # 模型被要求按【来源：《文件名》分块N】格式引用；未引用的分块视为与回答无关。
@@ -647,7 +678,9 @@ REPORT_SYSTEM_PROMPT = (
     "2. 章节结构：一、总体情况 二、行业结构分析 三、能源结构分析 四、预警动态 五、结论与建议；\n"
     "3. 严格基于摘要数据解读分析，不得编造摘要以外的数据或出处；\n"
     "4. 结论与建议需给出 2-3 条可落地的减排建议；\n"
-    "5. 语言精炼专业，全文 600-900 字，适合呈报政府部门。"
+    "5. 语言精炼专业，全文 600-900 字，适合呈报政府部门；\n"
+    "6. 报告面向读者是政府部门，不包含数据摘要原文；文中所有数值必须自带单位"
+    "（如亿吨、%、tCO2/万元），不得使用'同摘要''同上'等指代摘要的表述。"
 )
 
 
@@ -662,7 +695,7 @@ def generate_report(req: ReportReq):
             resp = client.post(
                 f"{DEEPSEEK_BASE_URL}/chat/completions",
                 headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
-                json={"model": "deepseek-chat",
+                json={"model": DEEPSEEK_MODEL,
                       "messages": [
                           {"role": "system", "content": REPORT_SYSTEM_PROMPT},
                           {"role": "user", "content": f"【数据摘要】\n{summary_text}"},

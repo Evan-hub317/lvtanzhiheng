@@ -33,4 +33,9 @@ public interface AlertService {
      * 预警统计摘要（未处理数/阈值预警数/AI检测数）
      */
     Map<String, Object> summary();
+
+    /**
+     * 按区域统计预警摘要：1=全国口径；省/市包含本级及下级区域
+     */
+    Map<String, Object> summaryByRegion(Integer regionId);
 }

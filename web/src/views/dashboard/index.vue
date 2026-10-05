@@ -3,7 +3,7 @@
     <!-- 欢迎条 + KPI + 操作 -->
     <div class="welcome-bar">
       <div>
-        <h2>欢迎回来，{{ displayName }} 👋</h2>
+        <h2>欢迎回来，{{ displayName }}</h2>
         <p>{{ today }} · 区域碳排放「监测—核算—预警—仿真—决策」一体化平台</p>
       </div>
       <div class="welcome-right">

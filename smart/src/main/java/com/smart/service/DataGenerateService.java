@@ -153,7 +153,7 @@ public class DataGenerateService {
         }
         if (cities.isEmpty() || paramByProvince.isEmpty()) {
             log.error("区域或省级参数缺失：cities={}, params={}", cities.size(), paramByProvince.size());
-            throw new IllegalStateException("全国区域数据未初始化，请先执行 docs/sql/regions_cn.sql");
+            throw new IllegalStateException("全国区域数据未初始化，请先执行数据库初始化脚本 regions_cn.sql");
         }
 
         // 4. 生成

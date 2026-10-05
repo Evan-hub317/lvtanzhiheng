@@ -3,7 +3,7 @@
     <!-- 深色科技风侧栏 -->
     <el-aside :width="collapsed ? '64px' : '220px'" class="layout-aside">
       <div class="logo">
-        <span class="logo-icon">🌿</span>
+        <img class="logo-icon" src="/favicon.ico" alt="logo" />
         <span v-show="!collapsed" class="logo-text tech-gradient-text">绿碳智衡</span>
       </div>
       <el-menu
@@ -132,7 +132,8 @@ async function handleCommand(cmd) {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 .logo-icon {
-  font-size: 22px;
+  width: 26px;
+  height: 26px;
 }
 .logo-text {
   font-size: 19px;
