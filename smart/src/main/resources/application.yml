@@ -37,8 +37,16 @@ spring:
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
-    # 开发期打印 SQL，上线前移除
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    # 关闭 SQL 打印（生产环境减噪）；本地调试 SQL 时临时改回
+    # org.apache.ibatis.logging.stdout.StdOutImpl 即可
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+
+# 日志级别：框架层降噪，业务日志（com.smart）保持 info
+logging:
+  level:
+    root: info
+    org.mybatis: warn
+    com.baomidou: warn
   global-config:
     banner: false
     db-config:

@@ -155,10 +155,27 @@ public class KBServiceImpl implements KBService {
 
     @Override
     public void delete(long id) {
-        requireDoc(id);
+        KbDocument doc = requireDoc(id);
         chunkMapper.delete(new LambdaQueryWrapper<KbChunk>().eq(KbChunk::getDocId, id));
         documentMapper.deleteById(id);
         refreshAlgoCache();
+        // 同步删除原文件（失败不阻断删除主流程，仅记录日志）
+        try {
+            Path path = Paths.get(doc.getFilePath());
+            // 历史相对路径兼容：直接路径不存在时按配置的 upload-dir 解析
+            if (!Files.exists(path)) {
+                Path based = Paths.get(uploadDir, doc.getFilePath());
+                if (Files.exists(based)) {
+                    path = based;
+                }
+            }
+            if (Files.exists(path)) {
+                Files.deleteIfExists(path);
+                log.info("知识库原文件已删除：{}", path);
+            }
+        } catch (IOException e) {
+            log.warn("知识库原文件删除失败（数据库记录已删除）: {}", e.getMessage());
+        }
     }
 
     /**

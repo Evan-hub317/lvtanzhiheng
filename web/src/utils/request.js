@@ -7,8 +7,11 @@ import router from '@/router'
  * - 请求头自动携带 satoken
  * - 业务码非 200 统一提示；401 跳转登录
  */
+// 部署时可在 public/config.js 中直接填写后端地址（不做 Nginx 反代）；默认走相对路径（Vite 代理）
+const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '/api'
+
 const request = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE,
   timeout: 15000
 })
 

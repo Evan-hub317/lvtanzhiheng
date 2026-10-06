@@ -60,6 +60,9 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -118,11 +121,16 @@ public class AgentServiceImpl implements AgentService {
     // ============ 系统提示词与工具注册 ============
     // 提示词统一放在 resources/prompts/*.st，通过 Spring AI PromptTemplate 渲染（便于调整与复用）
 
-    /** 渲染提示词模板（显式 UTF-8，避免中文乱码） */
+    /** 渲染提示词模板（显式 UTF-8，避免中文乱码）。
+     * 加载顺序：工作目录下的外部 prompts/ 目录（部署后可热改，每次请求实时读取，无需重启/重打包）
+     * → jar 内置 classpath 资源（本地开发/单 jar 部署零配置兜底） */
     private String renderPrompt(String fileName, Map<String, Object> vars) {
         try {
-            Resource resource = resourceLoader.getResource("classpath:prompts/" + fileName);
-            String template = resource.getContentAsString(StandardCharsets.UTF_8);
+            Path external = Paths.get("prompts", fileName);
+            String template = Files.exists(external)
+                    ? Files.readString(external, StandardCharsets.UTF_8)
+                    : resourceLoader.getResource("classpath:prompts/" + fileName)
+                            .getContentAsString(StandardCharsets.UTF_8);
             return new PromptTemplate(template).render(vars);
         } catch (IOException e) {
             throw new BizException("提示词模板加载失败：" + fileName);

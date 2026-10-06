@@ -278,7 +278,9 @@ async function send() {
   scrollBottom()
   try {
     const token = localStorage.getItem('satoken')
-    const resp = await fetch('/api/agent/chat', {
+    // 部署时可在 public/config.js 直接填写后端地址（无 Nginx 反代）；默认相对路径走 Vite 代理
+    const apiBase = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '/api'
+    const resp = await fetch(`${apiBase}/agent/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', satoken: token },
       body: JSON.stringify({ sessionId: currentSessionId.value, question: q })

@@ -110,19 +110,35 @@
       </div>
 
       <!-- DOCX 在线预览弹窗（docx-preview 渲染） -->
-      <el-dialog v-model="docPreviewVisible" :title="previewDocName" width="80%" top="4vh" destroy-on-close>
+      <el-dialog v-model="docPreviewVisible" :title="previewDocName" width="80%" top="4vh" destroy-on-close @closed="previewSeq++">
+        <div v-if="downloadProgress >= 0 && downloadProgress < 100" class="dl-bar">
+          <el-progress :percentage="downloadProgress" :stroke-width="12" striped striped-flow />
+          <span class="dl-text">正在加载文档</span>
+        </div>
         <div ref="docxContainer" class="docx-container" v-loading="docPreviewLoading" element-loading-text="正在渲染文档…"></div>
       </el-dialog>
 
       <!-- TXT/MD 原文预览弹窗（定位分块） -->
-      <el-dialog v-model="textPreviewVisible" :title="textPreviewName" width="80%" top="4vh" destroy-on-close>
+      <el-dialog v-model="textPreviewVisible" :title="textPreviewName" width="80%" top="4vh" destroy-on-close @closed="previewSeq++">
+        <div v-if="downloadProgress >= 0 && downloadProgress < 100" class="dl-bar">
+          <el-progress :percentage="downloadProgress" :stroke-width="12" striped striped-flow />
+          <span class="dl-text">正在加载文档</span>
+        </div>
         <div ref="textContainer" class="text-container">
           <pre v-html="textPreviewHtml"></pre>
         </div>
       </el-dialog>
 
       <!-- PDF 应用内预览弹窗（pdf.js 渲染，不依赖浏览器原生预览） -->
-      <el-dialog v-model="pdfPreviewVisible" :title="pdfPreviewName" width="80%" top="4vh" destroy-on-close>
+      <el-dialog v-model="pdfPreviewVisible" :title="pdfPreviewName" width="80%" top="4vh" destroy-on-close @closed="previewSeq++">
+        <div v-if="downloadProgress >= 0 && downloadProgress < 100" class="dl-bar">
+          <el-progress :percentage="downloadProgress" :stroke-width="12" striped striped-flow />
+          <span class="dl-text">正在加载文档</span>
+        </div>
+        <div v-if="pdfRenderTotal > 0 && pdfRenderDone < pdfRenderTotal" class="dl-bar">
+          <el-progress :percentage="Math.round((pdfRenderDone / pdfRenderTotal) * 100)" :stroke-width="12" striped striped-flow />
+          <span class="dl-text">正在渲染 PDF（{{ pdfRenderDone }}/{{ pdfRenderTotal }} 页）</span>
+        </div>
         <div ref="pdfContainer" class="pdf-container" v-loading="pdfPreviewLoading" element-loading-text="正在渲染 PDF…"></div>
       </el-dialog>
 
@@ -170,7 +186,9 @@ const msgBox = ref()
 
 const quickQuestions = ['碳达峰和碳中和有什么区别？', '碳排放核算用什么方法？', '我国碳达峰目标年份是？']
 
-// AI 回答为 Markdown 文本，转 HTML 渲染（加粗/列表/标题等）
+// 部署时可在 public/config.js 中直接填写后端地址（不做 Nginx 反代）；默认走相对路径（Vite 代理）
+const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.API_BASE) || '/api'
+const ALGO_BASE = (window.APP_CONFIG && window.APP_CONFIG.ALGO_BASE) || '/algo'
 function renderMd(content) {
   return content ? marked.parse(content, { breaks: true, gfm: true }) : ''
 }
@@ -225,7 +243,7 @@ async function sendQuestion() {
   history.push({ role: 'user', content: question })
 
   try {
-    const resp = await fetch('/algo/api/alg/rag-chat', {
+    const resp = await fetch(`${ALGO_BASE}/api/alg/rag-chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question, history })
@@ -319,9 +337,36 @@ const docPreviewLoading = ref(false)
 const previewDocName = ref('')
 const docxContainer = ref()
 
+// ===== 下载/渲染进度（方案 C：真实下载进度 + PDF 分页渲染进度） =====
+const downloadProgress = ref(-1)   // -1=不显示；0-100=下载中
+const pdfRenderDone = ref(0)
+const pdfRenderTotal = ref(0)
+
+// 预览请求序号：防止竞态——关掉/换开新文档后，旧文档的迟到渲染不得覆盖当前弹窗
+let previewSeq = 0
+
+/** 先打开对应预览弹窗（显示下载进度条），再取文件渲染 */
+function openPreviewShell(docType, docName) {
+  if (docType === 'docx') {
+    previewDocName.value = docName
+    docPreviewVisible.value = true
+  } else if (docType === 'pdf') {
+    pdfPreviewName.value = docName
+    pdfPreviewVisible.value = true
+  } else {
+    textPreviewName.value = docName
+    textPreviewVisible.value = true
+  }
+}
+
 async function viewDoc(d) {
+  const seq = ++previewSeq
+  openPreviewShell(d.docType, d.docName)
+  downloadProgress.value = 0
   try {
-    const blob = await fetchDocBlob(d.id)
+    const blob = await fetchDocBlob(d.id, p => { if (seq === previewSeq) downloadProgress.value = p })
+    if (seq !== previewSeq) return   // 期间已关窗/换开新文档：放弃本次渲染
+    downloadProgress.value = 100
     if (d.docType === 'docx') {
       await openDocxPreview(blob, d.docName, null)
     } else if (d.docType === 'pdf') {
@@ -330,19 +375,36 @@ async function viewDoc(d) {
       await openTextPreview(blob, d.docName, null)
     }
   } catch (e) {
-    ElMessage.error(e.message || '文件加载失败')
+    if (seq === previewSeq) {
+      downloadProgress.value = -1
+      ElMessage.error(e.message || '文件加载失败')
+    }
   }
 }
 
 // ===== 引用分块跳转：点击来源 → 浏览原件并定位到分块开头 =====
-async function fetchDocBlob(docId) {
+// 流式读取并汇报真实下载进度（onProgress：0-100）；Content-Length 缺失时进度条不显示
+async function fetchDocBlob(docId, onProgress) {
   const token = localStorage.getItem('satoken')
-  const resp = await fetch(`/api/kb/${docId}/file`, { headers: { satoken: token } })
+  const resp = await fetch(`${API_BASE}/kb/${docId}/file`, { headers: { satoken: token } })
   if (!resp.ok) {
     const err = await resp.json().catch(() => null)
     throw new Error(err?.msg || '文件加载失败')
   }
-  return await resp.blob()
+  const total = Number(resp.headers.get('content-length')) || 0
+  const reader = resp.body.getReader()
+  const chunks = []
+  let received = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+    received += value.length
+    if (onProgress && total > 0) {
+      onProgress(Math.min(100, Math.round((received / total) * 100)))
+    }
+  }
+  return new Blob(chunks)
 }
 
 // 文档分块内容缓存：docId -> { docType, chunks }
@@ -374,8 +436,13 @@ async function jumpToSource(s) {
     ElMessage.warning('未找到对应文档，可能已被删除')
     return
   }
+  const seq = ++previewSeq
+  openPreviewShell(anchor.docType, s.doc_name)
+  downloadProgress.value = 0
   try {
-    const blob = await fetchDocBlob(anchor.docId)
+    const blob = await fetchDocBlob(anchor.docId, p => { if (seq === previewSeq) downloadProgress.value = p })
+    if (seq !== previewSeq) return   // 期间已关窗/换开新文档：放弃本次渲染
+    downloadProgress.value = 100
     if (anchor.docType === 'docx') {
       await openDocxPreview(blob, s.doc_name, anchor.content)
     } else if (anchor.docType === 'pdf') {
@@ -384,7 +451,10 @@ async function jumpToSource(s) {
       await openTextPreview(blob, s.doc_name, anchor.content)
     }
   } catch (e) {
-    ElMessage.error(e.message || '文件加载失败')
+    if (seq === previewSeq) {
+      downloadProgress.value = -1
+      ElMessage.error(e.message || '文件加载失败')
+    }
   }
 }
 
@@ -665,7 +735,9 @@ async function openPdfPreview(blob, docName, anchorText) {
     const pdf = await pdfjsLib.getDocument({ data: await blob.arrayBuffer() }).promise
     // 先定位分块（纯文本层操作，渲染前完成）
     const anchor = anchorText ? await findPdfAnchor(pdf, anchorText) : null
-    // 逐页渲染（先建 canvas 保持 DOM 顺序，再并行渲染）
+    // 逐页渲染（先建 canvas 保持 DOM 顺序，再并行渲染；每页完成更新渲染进度）
+    pdfRenderTotal.value = pdf.numPages
+    pdfRenderDone.value = 0
     const renderTasks = []
     for (let p = 1; p <= pdf.numPages; p++) {
       const page = await pdf.getPage(p)
@@ -676,7 +748,8 @@ async function openPdfPreview(blob, docName, anchorText) {
       canvas.width = Math.floor(viewport.width)
       canvas.height = Math.floor(viewport.height)
       pdfContainer.value.appendChild(canvas)
-      renderTasks.push(page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise)
+      renderTasks.push(page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise
+        .then(() => { pdfRenderDone.value += 1 }))
     }
     await Promise.all(renderTasks)
     if (anchor) {
@@ -1097,6 +1170,22 @@ onBeforeUnmount(() => {
   padding: 0 2px;
   border-radius: 3px;
   scroll-margin-top: 12px;
+}
+
+/* ===== 下载/渲染进度条 ===== */
+.dl-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.dl-bar .el-progress {
+  flex: 1;
+}
+.dl-text {
+  font-size: 12px;
+  color: #51606e;
+  white-space: nowrap;
 }
 
 /* ===== PDF 应用内预览 ===== */
