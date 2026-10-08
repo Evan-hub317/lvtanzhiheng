@@ -71,7 +71,7 @@ web/                   前端（Vue3 + Vite）
 algo/                  Python 算法服务（FastAPI 单文件，端口 8000）
   .env                 配置文件（DeepSeek Key/模型/MySQL 连接，不入库）
 docs/
-  sql/                 数据库脚本（smart_carbon：结构与数据；仅表结构版在网盘，见运行指南）
+  sql/                 数据库脚本（smart_carbon_struct：表结构；结构与数据完整版在网盘，见运行指南）
   需求规格说明书.md     主 SRS（38 条功能需求）
   需求规格说明书-全国数据生成.md
   可行性分析-全国数据生成.md
@@ -90,11 +90,11 @@ JDK 17+ · MySQL 8.0+ · Python 3.9+ · Node.js 18+
 ### 1. 数据库初始化（仅首次）
 
 ```bash
-# 完整初始化：结构与数据一步到位（建库建表 + 基础字典/因子/账号/预设情景）
-mysql -uroot -p < docs/sql/smart_carbon.sql
+mysql -uroot -p < docs/sql/smart_carbon_struct.sql   # 1. 表结构（仓库内）
+mysql -uroot -p < smart_carbon.sql                   # 2. 结构与数据完整版（网盘获取）
 ```
 
-> 仅表结构版 `smart_carbon_struct.sql` 未随仓库分发（体积较大），见运行指南中的网盘链接。
+> `smart_carbon.sql`（结构与数据完整版）因体积较大未随仓库分发，见运行指南中的网盘链接。
 
 ### 2. Python 算法服务（端口 8000）
 
