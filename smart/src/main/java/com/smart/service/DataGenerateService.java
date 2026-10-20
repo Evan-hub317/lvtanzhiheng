@@ -51,6 +51,19 @@ public class DataGenerateService {
     private static final double NATIONAL_SECONDARY_RATIO = 39.0;   // 全国平均二产占 GDP 比重（%）
     /** 能耗强度年均下降率（技术效率提升，全国趋势） */
     private static final double ENERGY_EFFICIENCY_DECLINE = 0.985;
+    /** 校准锚年：GDP/强度参数以 2021 年为基准，此前年份按省增速回推、此后年份按增速外推 */
+    private static final int BASE_YEAR = 2021;
+
+    /** 特殊年份调整（历史特征）：2020 年疫情冲击全年微降；2017-2018 煤电产能反弹期增速略快 */
+    private static double yearAdjust(int year) {
+        if (year == 2020) {
+            return 0.97;
+        }
+        if (year == 2017 || year == 2018) {
+            return 1.015;
+        }
+        return 1.0;
+    }
 
     /**
      * 每亿元 GDP 的【年度】能源消费强度（行业 × 能源，索引 0 起，全国平均口径）
@@ -153,7 +166,7 @@ public class DataGenerateService {
         }
         if (cities.isEmpty() || paramByProvince.isEmpty()) {
             log.error("区域或省级参数缺失：cities={}, params={}", cities.size(), paramByProvince.size());
-            throw new IllegalStateException("全国区域数据未初始化，请先执行数据库初始化脚本 regions_cn.sql");
+            throw new IllegalStateException("全国区域数据未初始化，请先执行数据库初始化脚本 smart_carbon.sql");
         }
 
         // 4. 生成
@@ -192,12 +205,14 @@ public class DataGenerateService {
 
                     for (int year = startYear; year <= endYear; year++) {
                         int maxMonth = (year == endYear) ? endMonth : 12;
-                        double growth = Math.pow(growthBase, year - startYear);
+                        // 以 BASE_YEAR 为锚点：之前年份按省增速回推（factor<1），之后外推（factor>1）
+                        double growth = Math.pow(growthBase, year - BASE_YEAR);
                         for (int month = 1; month <= maxMonth; month++) {
                             double value = gdp * intensity * eiFactor * coalAdj * secAdj
                                     * SEASON[industry][month - 1]
                                     * heatingFactor(heating, energy, month)
                                     * growth
+                                    * yearAdjust(year)
                                     * (0.95 + random.nextDouble(0.10));
                             // 单位换算：燃料吨→万吨、热力GJ→万GJ
                             if (energy < 5 || energy == 7) {

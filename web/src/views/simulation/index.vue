@@ -52,12 +52,12 @@
           <p class="ctrl-tip">
             滑杆默认值 = {{ baseParam.regionName }}实际结构（煤炭/工业占比），
             基准情景即"维持现状"与基线预测一致；调整滑杆产生政策偏离。
-            绿色阴影带为蒙特卡洛 95% 置信区间。
+            绿色阴影带为蒙特卡洛 95% 预测区间。
           </p>
         </div>
 
         <!-- 已保存情景 -->
-        <div class="tech-panel scenario-panel">
+        <div class="tech-panel scenario-panel" v-loading="scenarioLoading" element-loading-text="情景加载中…">
           <div class="tech-panel-title">已保存情景（勾选叠加对比）</div>
           <el-checkbox-group v-model="checkedScenarios" @change="onCheckedChange">
             <div v-for="s in scenarios" :key="s.id" class="scenario-row">
@@ -88,13 +88,22 @@
               仿真期内未达峰
             </el-tag>
           </div>
-          <div
-            ref="chartRef"
-            v-loading="pageLoading"
-            element-loading-text="正在训练预测模型，请稍候…"
-            element-loading-background="rgba(255, 255, 255, 0.85)"
-            class="sim-chart"
-          ></div>
+          <div class="sim-chart-wrap">
+            <div
+              ref="chartRef"
+              v-loading="pageLoading"
+              element-loading-text="正在训练预测模型，请稍候…"
+              element-loading-background="rgba(255, 255, 255, 0.85)"
+              class="sim-chart"
+            ></div>
+            <!-- 手写转圈层：与图表容器完全分离（echarts 只管理自己的 div），
+                 覆盖「基础数据已出 → 当前仿真计算中」的等待期。
+                 注意：初始仿真发生在 pageLoading 期间，条件不能排除它 -->
+            <div v-if="simulating || chartLoading" class="sim-overlay">
+              <div class="sim-spinner"></div>
+              <span>正在计算仿真…</span>
+            </div>
+          </div>
         </div>
 
         <!-- 情景对比表 -->
@@ -184,6 +193,10 @@ const simPeakYear = computed(() => simResult.value?.peakYear ?? null)
 const simPeakValue = computed(() => simResult.value?.peakValue ?? null)
 
 const simulating = ref(false)
+/** 仿真重算中的图表转圈（参数调整/区域切换/预设切换） */
+const chartLoading = ref(false)
+/** 已保存情景列表/勾选轨迹加载中的转圈 */
+const scenarioLoading = ref(false)
 let simTimer = null
 
 function onParamChange() {
@@ -195,6 +208,7 @@ function onParamChange() {
 async function runSimulate() {
   if (!simResult.value && !predictData.value) return
   simulating.value = true
+  chartLoading.value = true
   try {
     const res = await simulateApi({ regionId: regionId.value, ...params, years: 6 })
     simResult.value = res.data
@@ -203,6 +217,7 @@ async function runSimulate() {
     // 拦截器已提示
   } finally {
     simulating.value = false
+    chartLoading.value = false
   }
 }
 
@@ -214,9 +229,14 @@ const scenarioCache = reactive(new Map())
 const saving = ref(false)
 
 async function loadScenarios() {
-  const res = await scenarioListApi({ regionId: regionId.value })
-  scenarios.value = res.data
-  checkedScenarios.value = checkedScenarios.value.filter(id => scenarios.value.some(s => s.id === id))
+  scenarioLoading.value = true
+  try {
+    const res = await scenarioListApi({ regionId: regionId.value })
+    scenarios.value = res.data
+    checkedScenarios.value = checkedScenarios.value.filter(id => scenarios.value.some(s => s.id === id))
+  } finally {
+    scenarioLoading.value = false
+  }
 }
 
 async function handleSave() {
@@ -231,12 +251,17 @@ async function handleSave() {
 }
 
 async function onCheckedChange(ids) {
-  // 新勾选的场景拉取轨迹
-  for (const id of ids) {
-    if (!scenarioCache.has(id)) {
-      const res = await scenarioDetailApi(id)
-      scenarioCache.set(id, res.data)
+  // 新勾选的场景拉取轨迹（预测图上转圈等待）
+  chartLoading.value = true
+  try {
+    for (const id of ids) {
+      if (!scenarioCache.has(id)) {
+        const res = await scenarioDetailApi(id)
+        scenarioCache.set(id, res.data)
+      }
     }
+  } finally {
+    chartLoading.value = false
   }
   renderChart()
 }
@@ -303,7 +328,7 @@ function renderChart() {
     legend.push('历史排放（已知）')
   }
 
-  // LSTM 预测（虚线 + 置信区间，拼接历史末点保持连续；拼接点标记 isBridge 由 tooltip formatter 过滤）
+  // LSTM 预测（虚线 + 预测区间，拼接历史末点保持连续；拼接点标记 isBridge 由 tooltip formatter 过滤）
   if (predictData.value && predictData.value.years.length) {
     const p = predictData.value
     const bridge = { value: [lastHistY, lastHistV], isBridge: true, symbol: 'none' }
@@ -377,7 +402,7 @@ function renderChart() {
   chart.setOption({
     tooltip: {
       trigger: 'axis',
-      // 自定义渲染：过滤拼接点（isBridge）与置信区间阴影带，避免交界年份重复显示
+      // 自定义渲染：过滤拼接点（isBridge）与预测区间阴影带，避免交界年份重复显示
       formatter: params => {
         if (!Array.isArray(params)) params = [params]
         const rows = params.filter(p => {
@@ -429,7 +454,16 @@ function renderChart() {
     yAxis: {
       type: 'value', name: '亿吨 CO₂',
       nameTextStyle: { color: '#51606e' },
-      axisLabel: { color: '#51606e', formatter: v => (v / 1e8).toFixed(1) },
+      axisLabel: {
+        color: '#51606e',
+        // 按量级自适应小数位：小区域（万吨级）刻度四舍五入到 1 位小数会标签重叠
+        formatter: v => {
+          const y = v / 1e8
+          if (y >= 10) return y.toFixed(0)   // 全国：整数亿吨
+          if (y >= 1) return y.toFixed(1)    // 省：1 位小数
+          return y.toFixed(3)                // 市/区：万吨级精度，保证相邻刻度不重复
+        }
+      },
       splitLine: { lineStyle: { color: '#eef2f7' } }
     },
     series
@@ -441,6 +475,8 @@ const pageLoading = ref(true)
 
 async function init() {
   try {
+    // 已保存情景不依赖字典与预测（默认全国口径），进入页面立即并行加载
+    const scenariosPromise = loadScenarios()
     const [regionRes, statusRes] = await Promise.all([regionListApi(), dataStatusApi()])
     regions.value = regionRes.data.filter(r => r.level <= 2)
     const { minYear, maxYear } = statusRes.data
@@ -449,7 +485,7 @@ async function init() {
       return
     }
     await loadPredict()
-    await loadScenarios()
+    await scenariosPromise
   } finally {
     pageLoading.value = false
   }
@@ -469,8 +505,8 @@ async function onRegionChange() {
   // 切换区域后滑杆回到该区域基准值（基准情景），预设选择同步重置，避免下拉框与图不一致
   preset.value = 1
   await loadBaseParam()
-  await loadPredict()
-  await loadScenarios()
+  // 预测/仿真与情景列表并行加载
+  await Promise.all([loadPredict(), loadScenarios()])
 }
 
 function handleResize() {
@@ -546,8 +582,36 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
+.sim-chart-wrap {
+  position: relative;
+}
 .sim-chart {
   height: 460px;
+}
+.sim-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 8px;
+  color: #51606e;
+  font-size: 13px;
+}
+.sim-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid #e0e8f0;
+  border-top-color: #0ea5e9;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .peak-tag {

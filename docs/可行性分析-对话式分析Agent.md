@@ -67,7 +67,7 @@ Java AgentService（Agent 循环）
 | `query_trend` | /analysis/trend | region、年份范围 | 年度序列 + **chart 指令**（趋势图） |
 | `query_structure` | /analysis/structure | region、年 | 行业结构 + chart（饼图） |
 | `run_calc` | /calc/execute | 年份范围 | 核算行数/校准报告 |
-| `predict_emission` | /sim/predict | region | 预测轨迹 + chart（含置信区间） |
+| `predict_emission` | /sim/predict | region | 预测轨迹 + chart（含预测区间） |
 | `detect_anomaly` | /alert/anomaly | — | 异常点 Top N + chart（散点标注） |
 | `simulate_policy` | /sim/simulate | region、煤/工业/能效参数 | 仿真轨迹 + chart + 达峰 |
 | `generate_report` | /report/generate | region、期型 | 报告标题/正文 |

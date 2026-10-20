@@ -8,6 +8,7 @@ import com.smart.vo.EnergyStructureVO;
 import com.smart.vo.KpiVO;
 import com.smart.vo.MonthlyVO;
 import com.smart.vo.RegionRankVO;
+import com.smart.vo.ScreenPeriodVO;
 import com.smart.vo.StructureVO;
 import com.smart.vo.TrendVO;
 import io.swagger.v3.oas.annotations.Operation;
@@ -105,5 +106,13 @@ public class AnalysisController {
     public Result<KpiVO> kpi(@RequestParam(defaultValue = "1") int regionId,
                              @RequestParam int year) {
         return Result.ok(analysisService.kpi(regionId, year));
+    }
+
+    @Operation(summary = "大屏时段聚合（碳排放热力图：起止月口径总量/碳强度/结构/排行）")
+    @GetMapping("/screen/period")
+    public Result<ScreenPeriodVO> screenPeriod(@RequestParam(defaultValue = "1") int regionId,
+                                               @RequestParam String startMonth,
+                                               @RequestParam String endMonth) {
+        return Result.ok(analysisService.screenPeriod(regionId, startMonth, endMonth));
     }
 }

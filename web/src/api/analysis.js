@@ -19,3 +19,6 @@ export const mapDataApi = params => request.get('/analysis/map', { params })
 export const detailPageApi = params => request.get('/analysis/detail', { params })
 
 export const kpiApi = params => request.get('/analysis/kpi', { params })
+
+// 大屏时段聚合（碳排放热力图）：起止月口径的总量/碳强度/结构/省排行
+export const screenPeriodApi = params => request.get('/analysis/screen/period', { params })

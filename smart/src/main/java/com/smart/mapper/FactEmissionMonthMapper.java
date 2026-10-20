@@ -3,8 +3,10 @@ package com.smart.mapper;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.smart.entity.FactEmissionMonth;
 import com.smart.vo.AnomalyPointVO;
+import com.smart.vo.EnergyStructureVO;
 import com.smart.vo.MonthPointVO;
 import com.smart.vo.MonthlyVO;
+import com.smart.vo.RegionRankVO;
 import com.smart.vo.StructureVO;
 import org.apache.ibatis.annotations.Delete;
 import org.apache.ibatis.annotations.Insert;
@@ -159,4 +161,58 @@ public interface FactEmissionMonthMapper extends BaseMapper<FactEmissionMonth> {
     List<MonthPointVO> selectMonthlyRangeByRegion(@Param("regionId") int regionId,
                                                   @Param("startYear") int startYear,
                                                   @Param("endYear") int endYear);
+
+    // ===== 大屏时段聚合（碳排放热力图：起止月口径；regionId 为空=全国） =====
+
+    /** 时段总量（直接口径） */
+    @Select("<script>" +
+            "SELECT COALESCE(SUM(emission), 0) FROM fact_emission_month " +
+            "WHERE energy_id &lt;= 6 " +
+            "<if test='regionId != null'> AND region_id IN (SELECT id FROM dim_region WHERE id = #{regionId} OR parent_id = #{regionId})</if> " +
+            "AND (year &gt; #{sy} OR (year = #{sy} AND month &gt;= #{sm})) " +
+            "AND (year &lt; #{ey} OR (year = #{ey} AND month &lt;= #{em}))" +
+            "</script>")
+    BigDecimal selectPeriodTotal(@Param("regionId") Integer regionId,
+                                 @Param("sy") int sy, @Param("sm") int sm,
+                                 @Param("ey") int ey, @Param("em") int em);
+
+    /** 时段能源结构（energyMin/Max 决定口径：1-6 直接、7-8 间接） */
+    @Select("<script>" +
+            "SELECT e.id AS energyId, e.energy_name AS energyName, ROUND(SUM(m.emission), 2) AS emission " +
+            "FROM fact_emission_month m JOIN dim_energy e ON e.id = m.energy_id " +
+            "WHERE m.energy_id BETWEEN #{energyMin} AND #{energyMax} " +
+            "<if test='regionId != null'> AND m.region_id IN (SELECT id FROM dim_region WHERE id = #{regionId} OR parent_id = #{regionId})</if> " +
+            "AND (m.year &gt; #{sy} OR (m.year = #{sy} AND m.month &gt;= #{sm})) " +
+            "AND (m.year &lt; #{ey} OR (m.year = #{ey} AND m.month &lt;= #{em})) " +
+            "GROUP BY e.id, e.energy_name ORDER BY e.id" +
+            "</script>")
+    List<EnergyStructureVO> selectPeriodEnergy(@Param("regionId") Integer regionId,
+                                               @Param("energyMin") int energyMin, @Param("energyMax") int energyMax,
+                                               @Param("sy") int sy, @Param("sm") int sm,
+                                               @Param("ey") int ey, @Param("em") int em);
+
+    /** 时段行业结构（直接口径） */
+    @Select("<script>" +
+            "SELECT i.id AS industryId, i.industry_name AS industryName, ROUND(SUM(m.emission), 2) AS emission " +
+            "FROM fact_emission_month m JOIN dim_industry i ON i.id = m.industry_id " +
+            "WHERE m.energy_id &lt;= 6 " +
+            "<if test='regionId != null'> AND m.region_id IN (SELECT id FROM dim_region WHERE id = #{regionId} OR parent_id = #{regionId})</if> " +
+            "AND (m.year &gt; #{sy} OR (m.year = #{sy} AND m.month &gt;= #{sm})) " +
+            "AND (m.year &lt; #{ey} OR (m.year = #{ey} AND m.month &lt;= #{em})) " +
+            "GROUP BY i.id, i.industry_name ORDER BY i.id" +
+            "</script>")
+    List<StructureVO> selectPeriodIndustry(@Param("regionId") Integer regionId,
+                                           @Param("sy") int sy, @Param("sm") int sm,
+                                           @Param("ey") int ey, @Param("em") int em);
+
+    /** 各省时段总量（汇总表为空时地图/TOP10 的回退数据源） */
+    @Select("SELECT r.parent_id AS regionId, p.region_name AS regionName, ROUND(SUM(m.emission), 2) AS emission " +
+            "FROM fact_emission_month m JOIN dim_region r ON r.id = m.region_id " +
+            "JOIN dim_region p ON p.id = r.parent_id " +
+            "WHERE m.energy_id <= 6 " +
+            "AND (m.year > #{sy} OR (m.year = #{sy} AND m.month >= #{sm})) " +
+            "AND (m.year < #{ey} OR (m.year = #{ey} AND m.month <= #{em})) " +
+            "GROUP BY r.parent_id, p.region_name ORDER BY emission DESC")
+    List<RegionRankVO> selectPeriodProvinces(@Param("sy") int sy, @Param("sm") int sm,
+                                             @Param("ey") int ey, @Param("em") int em);
 }

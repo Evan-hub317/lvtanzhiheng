@@ -6,7 +6,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 /**
- * 排放预测结果（历史 + 未来 + 置信区间 + 达峰）
+ * 排放预测结果（历史 + 未来 + 预测区间 + 达峰）
  */
 @Data
 public class PredictVO {
@@ -15,7 +15,7 @@ public class PredictVO {
     private List<Integer> historyYears;
     private List<BigDecimal> historyValues;
 
-    /** 预测年度序列（与置信区间等长） */
+    /** 预测年度序列（与预测区间等长） */
     private List<Integer> years;
     private List<BigDecimal> values;
     private List<BigDecimal> lower;

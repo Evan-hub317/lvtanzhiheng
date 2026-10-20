@@ -387,4 +387,90 @@ CREATE TABLE `sys_user`  (
   INDEX `idx_role`(`role_id`) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 4 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '用户表' ROW_FORMAT = DYNAMIC;
 
+-- ----------------------------
+-- 模块化汇总表（stat_*）：核算完成后由后端 SummaryMapper 全量重建，
+-- 为全国/省级口径的大屏、分析、仿真查询提速，避免对百万级明细实时聚合。
+-- 查询接口在汇总表为空时自动回退明细表，保证首次核算前页面可用。
+-- ----------------------------
+DROP TABLE IF EXISTS `stat_year_total`;
+CREATE TABLE `stat_year_total`  (
+  `region_id` int(11) NOT NULL COMMENT '1=全国；省ID=该省',
+  `year` int(11) NOT NULL COMMENT '年份',
+  `emission` decimal(20, 2) NOT NULL DEFAULT 0.00 COMMENT '年度排放总量（tCO2，直接口径）',
+  PRIMARY KEY (`region_id`, `year`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '汇总表-年度总量（全国/省，直接排放口径）' ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Table structure for stat_year_industry
+-- ----------------------------
+DROP TABLE IF EXISTS `stat_year_industry`;
+CREATE TABLE `stat_year_industry`  (
+  `region_id` int(11) NOT NULL COMMENT '1=全国；省ID=该省',
+  `industry_id` int(11) NOT NULL COMMENT '行业ID',
+  `year` int(11) NOT NULL COMMENT '年份',
+  `emission` decimal(20, 2) NOT NULL DEFAULT 0.00 COMMENT '年度排放量（tCO2，直接口径）',
+  PRIMARY KEY (`region_id`, `industry_id`, `year`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '汇总表-年度行业结构' ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Table structure for stat_year_energy
+-- ----------------------------
+DROP TABLE IF EXISTS `stat_year_energy`;
+CREATE TABLE `stat_year_energy`  (
+  `region_id` int(11) NOT NULL COMMENT '1=全国；省ID=该省',
+  `energy_id` int(11) NOT NULL COMMENT '能源品种ID（1-6直接口径；7-8间接排放）',
+  `year` int(11) NOT NULL COMMENT '年份',
+  `emission` decimal(20, 2) NOT NULL DEFAULT 0.00 COMMENT '年度排放量（tCO2）',
+  PRIMARY KEY (`region_id`, `energy_id`, `year`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '汇总表-年度能源结构（含间接排放）' ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Table structure for stat_month_total
+-- ----------------------------
+DROP TABLE IF EXISTS `stat_month_total`;
+CREATE TABLE `stat_month_total`  (
+  `region_id` int(11) NOT NULL COMMENT '1=全国；省ID=该省',
+  `year` int(11) NOT NULL COMMENT '年份',
+  `month` int(11) NOT NULL COMMENT '月份',
+  `emission` decimal(20, 2) NOT NULL DEFAULT 0.00 COMMENT '月度排放总量（tCO2，直接口径）',
+  PRIMARY KEY (`region_id`, `year`, `month`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '汇总表-月度总量（全国/省）' ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Table structure for stat_month_industry
+-- ----------------------------
+DROP TABLE IF EXISTS `stat_month_industry`;
+CREATE TABLE `stat_month_industry`  (
+  `region_id` int(11) NOT NULL COMMENT '1=全国；省ID=该省',
+  `industry_id` int(11) NOT NULL COMMENT '行业ID',
+  `year` int(11) NOT NULL COMMENT '年份',
+  `month` int(11) NOT NULL COMMENT '月份',
+  `emission` decimal(20, 2) NOT NULL DEFAULT 0.00 COMMENT '月度排放量（tCO2，直接口径）',
+  PRIMARY KEY (`region_id`, `industry_id`, `year`, `month`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '汇总表-月度行业结构' ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Table structure for stat_month_energy
+-- ----------------------------
+DROP TABLE IF EXISTS `stat_month_energy`;
+CREATE TABLE `stat_month_energy`  (
+  `region_id` int(11) NOT NULL COMMENT '1=全国；省ID=该省',
+  `energy_id` int(11) NOT NULL COMMENT '能源品种ID（1-6直接口径；7-8间接排放）',
+  `year` int(11) NOT NULL COMMENT '年份',
+  `month` int(11) NOT NULL COMMENT '月份',
+  `emission` decimal(20, 2) NOT NULL DEFAULT 0.00 COMMENT '月度排放量（tCO2）',
+  PRIMARY KEY (`region_id`, `energy_id`, `year`, `month`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '汇总表-月度能源结构（含间接排放）' ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Table structure for stat_city_year
+-- ----------------------------
+DROP TABLE IF EXISTS `stat_city_year`;
+CREATE TABLE `stat_city_year`  (
+  `city_id` int(11) NOT NULL COMMENT '城市ID（dim_region.id，level=2）',
+  `year` int(11) NOT NULL COMMENT '年份',
+  `emission` decimal(20, 2) NOT NULL DEFAULT 0.00 COMMENT '年度排放总量（tCO2，直接口径）',
+  PRIMARY KEY (`city_id`, `year`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_general_ci COMMENT = '汇总表-市级年度总量（排行用）' ROW_FORMAT = DYNAMIC;
+
 SET FOREIGN_KEY_CHECKS = 1;

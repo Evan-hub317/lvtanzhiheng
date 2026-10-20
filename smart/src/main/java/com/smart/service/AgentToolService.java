@@ -124,7 +124,7 @@ public class AgentToolService {
         return Map.of("summary", s);
     }
 
-    @Tool(name = "predict_emission", description = "LSTM 预测区域未来排放趋势（含达峰判断与置信区间）")
+    @Tool(name = "predict_emission", description = "LSTM 预测区域未来排放趋势（含达峰判断与预测区间）")
     public Map<String, Object> predictEmission(
             @ToolParam(description = "区域中文名") String region) {
         int regionId = resolveRegionId(region);

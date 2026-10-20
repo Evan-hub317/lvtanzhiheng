@@ -13,7 +13,7 @@ const routes = [
     path: '/screen',
     name: 'Screen',
     component: () => import('@/views/screen/index.vue'),
-    meta: { title: '全国碳排放监测大屏' }
+    meta: { title: '碳排放热力图' }
   },
   {
     path: '/',

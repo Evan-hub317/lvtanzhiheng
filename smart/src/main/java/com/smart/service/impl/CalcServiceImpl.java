@@ -7,6 +7,7 @@ import com.smart.mapper.FactEmissionMonthMapper;
 import com.smart.mapper.FactEmissionYearMapper;
 import com.smart.mapper.FactEnergyMonthMapper;
 import com.smart.mapper.FactorEmissionMapper;
+import com.smart.mapper.SummaryMapper;
 import com.smart.service.CalcService;
 import com.smart.vo.CalcResultVO;
 import com.smart.vo.DataStatusVO;
@@ -37,9 +38,48 @@ public class CalcServiceImpl implements CalcService {
     private final FactEmissionMonthMapper emissionMonthMapper;
     private final FactEmissionYearMapper emissionYearMapper;
     private final FactorEmissionMapper factorMapper;
+    private final SummaryMapper summaryMapper;
+
+    /** 重建 6 张模块化汇总表（全国 + 各省口径） */
+    private void rebuildSummaryTables() {
+        summaryMapper.deleteYearTotal();
+        summaryMapper.insertYearTotalNational();
+        summaryMapper.insertYearTotalProvinces();
+        summaryMapper.deleteYearIndustry();
+        summaryMapper.insertYearIndustryNational();
+        summaryMapper.insertYearIndustryProvinces();
+        summaryMapper.deleteYearEnergy();
+        summaryMapper.insertYearEnergyNational();
+        summaryMapper.insertYearEnergyProvinces();
+        summaryMapper.deleteMonthTotal();
+        summaryMapper.insertMonthTotalNational();
+        summaryMapper.insertMonthTotalProvinces();
+        summaryMapper.deleteMonthIndustry();
+        summaryMapper.insertMonthIndustryNational();
+        summaryMapper.insertMonthIndustryProvinces();
+        summaryMapper.deleteMonthEnergy();
+        summaryMapper.insertMonthEnergyNational();
+        summaryMapper.insertMonthEnergyProvinces();
+        summaryMapper.deleteCityYear();
+        summaryMapper.insertCityYear();
+    }
+
+    /** 核算互斥：防止前端超时后重复点击引发并发核算（数据错乱） */
+    private final java.util.concurrent.atomic.AtomicBoolean calcRunning = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     @Override
     public CalcResultVO execute(int startYear, int endYear) {
+        if (!calcRunning.compareAndSet(false, true)) {
+            throw new BizException("核算正在进行中，请稍候（勿重复点击）");
+        }
+        try {
+            return doExecute(startYear, endYear);
+        } finally {
+            calcRunning.set(false);
+        }
+    }
+
+    private CalcResultVO doExecute(int startYear, int endYear) {
         // 1. 确定数据年份范围
         DataStatusVO status = energyMonthMapper.selectStatus();
         if (status == null || status.getMinYear() == null) {
@@ -80,6 +120,19 @@ public class CalcServiceImpl implements CalcService {
         emissionMonthMapper.updateIntensity(from, to);
         long yearRows = emissionMonthMapper.insertYearAgg(from, to);
         emissionMonthMapper.updateYoy(from, to);
+
+        // 汇总表重建放后台线程：不拖长核算接口耗时（核心核算在前端超时阈值内完成即可返回）；
+        // 重建期间查询会回退明细表（AnalysisServiceImpl 已做空结果回退）
+        Thread rebuildThread = new Thread(() -> {
+            try {
+                rebuildSummaryTables();
+                log.info("模块化汇总表重建完成");
+            } catch (Exception e) {
+                log.error("模块化汇总表重建失败（汇总查询将回退明细表）", e);
+            }
+        }, "summary-rebuild");
+        rebuildThread.setDaemon(true);
+        rebuildThread.start();
 
         CalcResultVO vo = new CalcResultVO();
         vo.setMonthRows(monthRows);

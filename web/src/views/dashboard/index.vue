@@ -7,15 +7,17 @@
         <p>{{ today }} · 区域碳排放「监测—核算—预警—仿真—决策」一体化平台</p>
       </div>
       <div class="welcome-right">
-        <div v-if="kpi" class="kpi-inline">
-          <span class="kpi-year">{{ kpi.year }} 年排放总量</span>
-          <span class="kpi-value">{{ formatEmission(kpi.totalEmission) }}</span>
-          <span v-if="kpi.yoyRate !== null && kpi.yoyRate !== undefined" class="kpi-yoy" :class="kpi.yoyRate >= 0 ? 'up' : 'down'">
+        <div class="kpi-inline">
+          <span class="kpi-year">{{ kpi?.year ?? '-' }} 年排放总量</span>
+          <span class="kpi-value">{{ formatEmission(kpi?.totalEmission) }}</span>
+          <span v-if="kpi?.yoyRate !== null && kpi?.yoyRate !== undefined" class="kpi-yoy" :class="kpi.yoyRate >= 0 ? 'up' : 'down'">
             {{ kpi.yoyRate >= 0 ? '▲' : '▼' }} {{ Math.abs(kpi.yoyRate) }}%
           </span>
-          <span v-if="kpi.intensity !== null && kpi.intensity !== undefined" class="kpi-intensity">
+          <span v-else class="kpi-yoy up">▲ -%</span>
+          <span v-if="kpi?.intensity !== null && kpi?.intensity !== undefined" class="kpi-intensity">
             碳强度 {{ kpi.intensity }} tCO₂/万元
           </span>
+          <span v-else class="kpi-intensity">碳强度 - tCO₂/万元</span>
         </div>
         <template v-if="userStore.isAdmin">
           <el-button class="action-btn" size="small" :loading="generating" @click="handleGenerate">生成模拟数据</el-button>
@@ -48,7 +50,7 @@
               查看详情<el-icon><ArrowRight /></el-icon>
             </el-button>
           </div>
-          <div ref="trendRef" class="chart-box"></div>
+          <div ref="trendRef" class="chart-box" v-loading="loading" element-loading-text="加载中…"></div>
         </div>
       </el-col>
       <el-col :xs="24" :md="8">
@@ -60,7 +62,7 @@
               查看详情<el-icon><ArrowRight /></el-icon>
             </el-button>
           </div>
-          <div ref="pieRef" class="chart-box"></div>
+          <div ref="pieRef" class="chart-box" v-loading="loading" element-loading-text="加载中…"></div>
         </div>
       </el-col>
     </el-row>
@@ -132,6 +134,8 @@ const trendRef = ref()
 const pieRef = ref()
 let trendChart = null
 let pieChart = null
+/** 图表数据加载中（转圈遮罩） */
+const loading = ref(false)
 
 function renderTrendChart(rows) {
   trendChart = trendChart || echarts.init(trendRef.value)
@@ -163,7 +167,16 @@ function renderTrendChart(rows) {
       name: '亿吨 CO₂',
       nameTextStyle: { color: '#51606e', padding: [0, 0, 0, 4] },
       nameGap: 12,
-      axisLabel: { color: '#51606e', formatter: v => (v / 1e8).toFixed(1) },
+      axisLabel: {
+        color: '#51606e',
+        // 按量级自适应小数位，避免小区域（万吨级）刻度标签四舍五入后重叠
+        formatter: v => {
+          const y = v / 1e8
+          if (y >= 10) return y.toFixed(0)
+          if (y >= 1) return y.toFixed(1)
+          return y.toFixed(3)
+        }
+      },
       splitLine: { lineStyle: { color: '#eef2f7' } }
     },
     series: [
@@ -228,29 +241,34 @@ function renderPieChart(rows) {
 }
 
 async function loadDashboardData() {
-  const res = await dataStatusApi()
-  status.value = res.data
-  if (!hasData.value) {
-    renderTrendChart([])
-    renderPieChart([])
-    return
-  }
-  const startYear = status.value.minYear
-  // 年度分析一律使用最后一个完整年（当年未过完不参与趋势/KPI）
-  const endYear = chartYear.value
-  if (hasEmission.value) {
-    const [trendRes, structureRes, kpiRes] = await Promise.all([
-      trendApi({ regionId: 1, startYear, endYear }),
-      structureApi({ regionId: 1, year: endYear }),
-      kpiApi({ regionId: 1, year: endYear })
-    ])
-    renderTrendChart(trendRes.data)
-    renderPieChart(structureRes.data)
-    kpi.value = kpiRes.data
-  } else {
-    renderTrendChart([])
-    renderPieChart([])
-    ElMessage.info('已有活动数据，请点击「执行核算」生成核算结果')
+  loading.value = true
+  try {
+    const res = await dataStatusApi()
+    status.value = res.data
+    if (!hasData.value) {
+      renderTrendChart([])
+      renderPieChart([])
+      return
+    }
+    const startYear = status.value.minYear
+    // 年度分析一律使用最后一个完整年（当年未过完不参与趋势/KPI）
+    const endYear = chartYear.value
+    if (hasEmission.value) {
+      const [trendRes, structureRes, kpiRes] = await Promise.all([
+        trendApi({ regionId: 1, startYear, endYear }),
+        structureApi({ regionId: 1, year: endYear }),
+        kpiApi({ regionId: 1, year: endYear })
+      ])
+      renderTrendChart(trendRes.data)
+      renderPieChart(structureRes.data)
+      kpi.value = kpiRes.data
+    } else {
+      renderTrendChart([])
+      renderPieChart([])
+      ElMessage.info('已有活动数据，请点击「执行核算」生成核算结果')
+    }
+  } finally {
+    loading.value = false
   }
 }
 
@@ -260,13 +278,13 @@ const calculating = ref(false)
 
 async function handleGenerate() {
   await ElMessageBox.confirm(
-    '将清空旧模拟数据并重新生成（约 20 万条，耗时约 1 分钟）。是否继续？',
+    '将清空旧模拟数据并重新生成（2016 年至今，约 130 万条，耗时约 5 分钟）。是否继续？',
     '生成模拟数据',
     { type: 'warning' }
   )
   generating.value = true
   try {
-    const res = await generateDataApi({ mode: 'all', startYear: 2021, injectAnomaly: true })
+    const res = await generateDataApi({ mode: 'all', startYear: 2016, injectAnomaly: true })
     const d = res.data
     ElMessage.success(`生成完成：${d.totalCount} 条 / 区县 ${d.countyCount} 个 / 注入异常 ${d.anomalyCount} 条 / 耗时 ${d.seconds}s`)
     await loadDashboardData()
@@ -346,6 +364,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 14px;
   flex-wrap: wrap;
+  /* 占满整行：KPI 与操作按钮始终在问候语下方，加载前后布局一致（不随内容宽度跳行） */
+  flex-basis: 100%;
 }
 .kpi-inline {
   display: flex;

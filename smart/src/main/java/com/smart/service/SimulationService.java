@@ -13,7 +13,7 @@ public interface SimulationService {
 
     /**
      * 排放预测：月度历史序列 → LSTM 预测 120 个月 → 聚合成年度
-     * 含蒙特卡洛 95% 置信区间与达峰年份识别
+     * 含蒙特卡洛 95% 预测区间与达峰年份识别
      */
     PredictVO predict(int regionId);
 

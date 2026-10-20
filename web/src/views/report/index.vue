@@ -304,11 +304,15 @@ function handleResize() {
 }
 
 onMounted(async () => {
-  const statusRes = await dataStatusApi()
-  statusInfo.value = statusRes.data
-  genForm.year = yearOptions.value[yearOptions.value.length - 1]
-  genForm.month = monthOptions.value[0]
-  await loadReports()
+  // 报告历史与状态接口并行加载（历史列表不依赖状态，不必排队等慢查询）
+  await Promise.all([
+    dataStatusApi().then(res => {
+      statusInfo.value = res.data
+      genForm.year = yearOptions.value[yearOptions.value.length - 1]
+      genForm.month = monthOptions.value[0]
+    }),
+    loadReports()
+  ])
   window.addEventListener('resize', handleResize)
 })
 

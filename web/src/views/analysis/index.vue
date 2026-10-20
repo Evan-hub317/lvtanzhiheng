@@ -8,7 +8,7 @@
       </div>
       <div class="filter-item">
         <span class="filter-label">年份</span>
-        <el-select v-model="filters.year" style="width: 110px" @change="onMainChange">
+        <el-select v-model="filters.year" style="width: 110px" placeholder="-" @change="onMainChange">
           <el-option v-for="y in yearOptions" :key="y" :label="`${y} 年`" :value="y" />
         </el-select>
       </div>
@@ -32,7 +32,7 @@
       <el-col :xs="24" :md="16">
         <div class="tech-panel row-fill">
           <div class="tech-panel-title">{{ currentRegionName }} · 年度碳排放趋势{{ energyName ? '（' + energyName + '）' : '' }}</div>
-          <div ref="trendRef" class="chart-box"></div>
+          <div ref="trendRef" class="chart-box" v-loading="loading" element-loading-text="加载中…"></div>
         </div>
       </el-col>
       <el-col :xs="24" :md="8">
@@ -45,7 +45,7 @@
               <el-radio-button value="indirect">能源（间接）</el-radio-button>
             </el-radio-group>
           </div>
-          <div ref="pieRef" class="chart-box"></div>
+          <div ref="pieRef" class="chart-box" v-loading="loading" element-loading-text="加载中…"></div>
         </div>
       </el-col>
     </el-row>
@@ -55,15 +55,15 @@
       <el-col :xs="24" :md="12">
         <div class="tech-panel">
           <div class="tech-panel-title">
-            {{ filters.year }} 年月度排放（季节规律{{ filters.industryId ? ' · ' + industryName : '' }}{{ filters.energyId ? ' · ' + energyName : '' }}）
+            {{ yearLabel }} 年月度排放（季节规律{{ filters.industryId ? ' · ' + industryName : '' }}{{ filters.energyId ? ' · ' + energyName : '' }}）
           </div>
-          <div ref="monthRef" class="chart-box"></div>
+          <div ref="monthRef" class="chart-box" v-loading="loading" element-loading-text="加载中…"></div>
         </div>
       </el-col>
       <el-col :xs="24" :md="12">
         <div class="tech-panel">
-          <div class="tech-panel-title">{{ filters.year }} 年各市排放排行</div>
-          <div class="rank-scroll">
+          <div class="tech-panel-title">{{ yearLabel }} 年各市排放排行</div>
+          <div class="rank-scroll" v-loading="loading" element-loading-text="加载中…">
             <div ref="rankRef" class="chart-box rank-chart"></div>
           </div>
         </div>
@@ -121,6 +121,8 @@ import {
 } from '@/api/analysis'
 
 const route = useRoute()
+/** 图表数据加载中（转圈遮罩） */
+const loading = ref(false)
 
 // ===== 维度数据 =====
 const regions = ref([])
@@ -131,10 +133,13 @@ const yearOptions = ref([])
 const filters = reactive({ regionId: 1, year: null, industryId: null, energyId: null })
 const structType = ref('industry')
 
+/** 年份显示：数据未加载完成（filters.year 为 null）时以“-”占位 */
+const yearLabel = computed(() => filters.year ?? '-')
+
 const structTitle = computed(() => {
-  if (structType.value === 'industry') return `${filters.year} 年行业排放结构`
-  if (structType.value === 'energy') return `${filters.year} 年能源结构（直接排放）`
-  return `${filters.year} 年间接排放结构`
+  if (structType.value === 'industry') return `${yearLabel.value} 年行业排放结构`
+  if (structType.value === 'energy') return `${yearLabel.value} 年能源结构（直接排放）`
+  return `${yearLabel.value} 年间接排放结构`
 })
 
 const currentRegionName = computed(
@@ -172,7 +177,16 @@ function renderTrend(rows) {
       type: 'value', name: '亿吨 CO₂',
       nameTextStyle: { color: '#51606e', padding: [0, 0, 0, 4] },
       nameGap: 12,
-      axisLabel: { color: '#51606e', formatter: v => (v / 1e8).toFixed(1) },
+      axisLabel: {
+        color: '#51606e',
+        // 按量级自适应小数位，避免小区域（万吨级）刻度标签四舍五入后重叠
+        formatter: v => {
+          const y = v / 1e8
+          if (y >= 10) return y.toFixed(0)
+          if (y >= 1) return y.toFixed(1)
+          return y.toFixed(3)
+        }
+      },
       splitLine: { lineStyle: { color: '#eef2f7' } }
     },
     series: [{
@@ -393,38 +407,41 @@ function onRegionChange() {
 
 function onMainChange() {
   const seq = ++mainSeq
-  loadTrend(seq)
-  loadStructure(seq)
-  loadMonthly(seq)
-  loadRanking(seq)
   detailQuery.pageNum = 1
-  loadDetail(seq)
+  loading.value = true
+  Promise.all([loadTrend(seq), loadStructure(seq), loadMonthly(seq), loadRanking(seq), loadDetail(seq)])
+    .finally(() => { if (seq === mainSeq) loading.value = false })
 }
 
 function onIndustryChange() {
   const seq = ++mainSeq
-  loadMonthly(seq)
   detailQuery.pageNum = 1
-  loadDetail(seq)
+  loading.value = true
+  Promise.all([loadMonthly(seq), loadDetail(seq)])
+    .finally(() => { if (seq === mainSeq) loading.value = false })
 }
 
 function onStructTypeChange() {
   const seq = ++mainSeq
-  loadStructure(seq)
+  loading.value = true
+  Promise.all([loadStructure(seq)])
+    .finally(() => { if (seq === mainSeq) loading.value = false })
 }
 
 function onDetailPageChange() {
   const seq = ++mainSeq
-  loadDetail(seq)
+  loading.value = true
+  Promise.all([loadDetail(seq)])
+    .finally(() => { if (seq === mainSeq) loading.value = false })
 }
 
 function onEnergyChange() {
   // 能源筛选联动：年度趋势 + 月度趋势 + 明细表
   const seq = ++mainSeq
-  loadTrend(seq)
-  loadMonthly(seq)
   detailQuery.pageNum = 1
-  loadDetail(seq)
+  loading.value = true
+  Promise.all([loadTrend(seq), loadMonthly(seq), loadDetail(seq)])
+    .finally(() => { if (seq === mainSeq) loading.value = false })
 }
 
 function handleResize() {
@@ -435,6 +452,8 @@ function handleResize() {
 }
 
 onMounted(async () => {
+  // 进入页面立即转圈：首屏的字典/状态查询同样耗时，不能空窗等待
+  loading.value = true
   const [regionRes, industryRes, energyRes, statusRes] = await Promise.all([
     regionListApi(), industryListApi(), energyListApi(), dataStatusApi()
   ])
@@ -455,7 +474,9 @@ onMounted(async () => {
     filters.industryId = Number(route.query.industryId)
   }
   if (filters.year) {
-    onMainChange()
+    onMainChange()   // 内部会重新置位并在全部请求完成后关闭转圈
+  } else {
+    loading.value = false
   }
   window.addEventListener('resize', handleResize)
 })

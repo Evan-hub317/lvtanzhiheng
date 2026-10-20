@@ -19,7 +19,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 | 接口 | 说明 |
 |---|---|
 | GET /health | 健康检查 |
-| POST /api/alg/predict | 历史序列 → 未来 10 年预测 + 蒙特卡洛 95% 置信区间 + 达峰年份 |
+| POST /api/alg/predict | 历史序列 → 未来 10 年预测 + 蒙特卡洛 95% 预测区间 + 达峰年份 |
 | POST /api/alg/simulate | 情景参数（煤炭占比/工业占比/能效下降率）→ 排放轨迹仿真 |
 | POST /api/alg/anomaly | 孤立森林异常检测，返回异常点与分数 |
 | POST /api/alg/embed | 文本向量化（512 维） |

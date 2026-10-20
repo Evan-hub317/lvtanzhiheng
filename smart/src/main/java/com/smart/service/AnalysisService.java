@@ -6,6 +6,7 @@ import com.smart.vo.EnergyStructureVO;
 import com.smart.vo.KpiVO;
 import com.smart.vo.MonthlyVO;
 import com.smart.vo.RegionRankVO;
+import com.smart.vo.ScreenPeriodVO;
 import com.smart.vo.StructureVO;
 import com.smart.vo.TrendVO;
 
@@ -73,4 +74,10 @@ public interface AnalysisService {
      * 年度核心指标：总量、同比、碳强度
      */
     KpiVO kpi(int regionId, int year);
+
+    /**
+     * 大屏时段聚合（碳排放热力图）：起止月口径的总量/碳强度/结构/排行。
+     * regionId=1 时附带各省排行（地图 + TOP10 数据源）；省/市级返回该区域口径结构数据
+     */
+    ScreenPeriodVO screenPeriod(int regionId, String startMonth, String endMonth);
 }

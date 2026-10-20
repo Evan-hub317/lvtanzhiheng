@@ -18,6 +18,7 @@ import com.smart.mapper.FactEnergyMonthMapper;
 import com.smart.mapper.ProvinceParamMapper;
 import com.smart.mapper.ScenarioRecordMapper;
 import com.smart.mapper.SimResultMapper;
+import com.smart.mapper.SummaryMapper;
 import com.smart.service.AnalysisService;
 import com.smart.service.SimulationService;
 import com.smart.vo.DataStatusVO;
@@ -42,7 +43,7 @@ import java.util.stream.Collectors;
 /**
  * 情景仿真引擎（Java 调度层，核心计算在 Python 算法服务）
  * <p>
- * 预测链路：月度历史序列 → LSTM（含蒙特卡洛置信区间）→ 年度聚合 → 达峰识别
+ * 预测链路：月度历史序列 → LSTM（含蒙特卡洛预测区间）→ 年度聚合 → 达峰识别
  * 仿真链路：最新年总排放为基准 → Kaya 式模型（能源结构×产业结构×技术效率）→ 未来轨迹
  */
 @Slf4j
@@ -56,6 +57,7 @@ public class SimulationServiceImpl implements SimulationService {
     private final AlgoClient algoClient;
     private final FactEnergyMonthMapper energyMonthMapper;
     private final FactEmissionMonthMapper emissionMonthMapper;
+    private final SummaryMapper summaryMapper;
     private final ScenarioRecordMapper scenarioMapper;
     private final SimResultMapper simResultMapper;
     private final AnalysisService analysisService;
@@ -68,10 +70,24 @@ public class SimulationServiceImpl implements SimulationService {
         int startYear = status.getMinYear();
         int endYear = status.getMaxYear();
 
-        // 1. 月度历史序列（t 为连续月份序号）
-        List<MonthPointVO> months = regionId == PROVINCE_REGION_ID
-                ? emissionMonthMapper.selectMonthlyRangeAll(startYear, endYear)
+        // 1. 月度历史序列（t 为连续月份序号；全国/省级口径走汇总表提速）
+        List<MonthPointVO> months;
+        int scope = regionId == PROVINCE_REGION_ID ? 1 : -1;
+        if (scope < 0) {
+            DimRegion region = regionMapper.selectById(regionId);
+            if (region != null && region.getLevel() == 1) {
+                scope = regionId;
+            }
+        }
+        months = scope >= 0
+                ? summaryMapper.selectMonthlyRange(scope, startYear, endYear)
                 : emissionMonthMapper.selectMonthlyRangeByRegion(regionId, startYear, endYear);
+        // 汇总表为空时回退明细表（与分析模块一致，防止汇总重建失败导致仿真不可用）
+        if (months.isEmpty() && scope >= 0) {
+            months = regionId == PROVINCE_REGION_ID
+                    ? emissionMonthMapper.selectMonthlyRangeAll(startYear, endYear)
+                    : emissionMonthMapper.selectMonthlyRangeByRegion(regionId, startYear, endYear);
+        }
         if (months.size() < 12) {
             throw new BizException("历史数据不足一年，无法预测");
         }
@@ -128,7 +144,7 @@ public class SimulationServiceImpl implements SimulationService {
             yearMonthCount.merge(year, 1, Integer::sum);
         }
         // 首年补全：历史最后不完整年的已知月值并入预测首年（合成完整年，预测曲线连续）
-        // 已知月无不确定度，中心线与置信区间上下界同样并入，避免区间带在首年塌陷
+        // 已知月无不确定度，中心线与预测区间上下界同样并入，避免区间带在首年塌陷
         if (lastYearKnownSum != null && forecastYearMap.containsKey(lastKnownYear)) {
             BigDecimal[] acc = forecastYearMap.get(lastKnownYear);
             acc[0] = acc[0].add(lastYearKnownSum);
@@ -153,8 +169,15 @@ public class SimulationServiceImpl implements SimulationService {
             vo.getUpper().add(acc[2].setScale(2, RoundingMode.HALF_UP));
         });
 
-        // 4. 达峰识别（预测段年度序列）
-        detectPeak(vo.getYears(), vo.getValues(), vo);
+        // 4. 达峰识别（历史完整年 + 预测段一并扫描：已过峰区域报历史真实峰年，
+        //    而非把单调下降预测的首个预测年误报为达峰）
+        List<Integer> allYears = new ArrayList<>(histYearMap.keySet());
+        List<BigDecimal> allValues = new ArrayList<>(histYearMap.values());
+        for (int i = 0; i < vo.getYears().size(); i++) {
+            allYears.add(vo.getYears().get(i));
+            allValues.add(vo.getValues().get(i));
+        }
+        detectPeak(allYears, allValues, vo);
         return vo;
     }
 
