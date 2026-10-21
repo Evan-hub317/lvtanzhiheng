@@ -74,16 +74,17 @@
       <!-- 中间：地图 -->
       <div class="map-panel">
         <div ref="mapRef" class="map-box" v-loading="loading" element-loading-text="加载中…"></div>
+        <div class="map-attribution">
+          地图数据来源：阿里云 DataV.GeoAtlas（datav.aliyun.com/portal/school/atlas/area_selector）
+        </div>
       </div>
 
-      <!-- 右侧：排行 + 结构 -->
+      <!-- 右侧：排行 + 行业结构 -->
       <div class="side-panel" v-loading="loading" element-loading-text="加载中…" element-loading-background="rgba(10, 20, 40, 0.6)">
         <div class="panel-title">省份排放 TOP10</div>
         <div ref="rankRef" class="rank-chart"></div>
-        <div class="panel-title sub">能源结构（直接）</div>
-        <div ref="pieRef" class="structure-chart"></div>
-        <div class="panel-title sub">能源结构（间接）</div>
-        <div ref="indirectRef" class="indirect-chart"></div>
+        <div class="panel-title sub">行业结构</div>
+        <div ref="industryRef" class="structure-chart"></div>
       </div>
     </div>
 
@@ -133,9 +134,8 @@ let clockTimer = null
 
 const mapRef = ref()
 const rankRef = ref()
-const pieRef = ref()
-const indirectRef = ref()
-let mapChart, rankChart, pieChart, indirectChart
+const industryRef = ref()
+let mapChart, rankChart, industryChart
 
 /** 时段文案：2025年1月 - 2025年12月 */
 const periodText = computed(() => {
@@ -281,8 +281,7 @@ async function loadScreenData() {
     intensity.value = d.intensity != null ? Number(d.intensity).toFixed(2) : null
     renderMap(d.regions || [])
     renderRank(d.regions || [])
-    renderPie(d.direct || [])
-    renderIndirect(d.indirect || [])
+    renderIndustry(d.industries || [])
   } finally {
     loading.value = false
   }
@@ -374,41 +373,13 @@ function renderRank(rows) {
   })
 }
 
-function renderPie(rows) {
-  pieChart = pieChart || echarts.init(pieRef.value)
+function renderIndustry(rows) {
+  industryChart = industryChart || echarts.init(industryRef.value)
   if (!rows?.length) {
-    pieChart.setOption({ graphic: emptyScreenGraphic('暂无数据') }, true)
+    industryChart.setOption({ graphic: emptyScreenGraphic('暂无数据') }, true)
     return
   }
-  pieChart.setOption(buildPieOption(rows))
-}
-
-function emptyScreenGraphic(text) {
-  return { type: 'text', left: 'center', top: 'middle', style: { text, fill: '#7ea6c8', fontSize: 13 } }
-}
-
-function renderIndirect(rows) {
-  indirectChart = echarts.getInstanceByDom(indirectRef.value) || echarts.init(indirectRef.value)
-  if (!rows?.length) {
-    indirectChart.setOption({ graphic: emptyScreenGraphic('暂无数据') }, true)
-    return
-  }
-  indirectChart.setOption({
-    tooltip: { trigger: 'item', formatter: '{b}：{c} 亿吨（{d}%）' },
-    legend: { bottom: 0, type: 'scroll', icon: 'circle', textStyle: { color: '#7ea6c8', fontSize: 10 } },
-    color: ['#fbbf24', '#f87171'],
-    series: [{
-      type: 'pie', radius: ['40%', '62%'], center: ['50%', '44%'],
-      label: { color: '#c9e2f5', fontSize: 10, formatter: '{b}\n{d}%' },
-      itemStyle: { borderColor: '#0a1428', borderWidth: 1 },
-      data: rows.map(r => ({ name: r.energyName, value: Number((r.emission / 1e8).toFixed(2)) }))
-    }]
-  })
-  indirectChart.resize()
-}
-
-function buildPieOption(rows) {
-  return {
+  industryChart.setOption({
     tooltip: { trigger: 'item', formatter: '{b}：{c} 亿吨（{d}%）' },
     legend: { bottom: 0, type: 'scroll', icon: 'circle', textStyle: { color: '#7ea6c8', fontSize: 10 } },
     color: ['#22d3ee', '#4ade80', '#fbbf24', '#a78bfa', '#f87171', '#f472b6', '#94a3b8', '#34d399'],
@@ -416,9 +387,14 @@ function buildPieOption(rows) {
       type: 'pie', radius: ['40%', '62%'], center: ['50%', '44%'],
       label: { color: '#c9e2f5', fontSize: 10, formatter: '{b}\n{d}%' },
       itemStyle: { borderColor: '#0a1428', borderWidth: 1 },
-      data: rows.map(r => ({ name: r.energyName, value: Number((r.emission / 1e8).toFixed(2)) }))
+      data: rows.map(r => ({ name: r.industryName, value: Number((r.emission / 1e8).toFixed(2)) }))
     }]
-  }
+  })
+  industryChart.resize()
+}
+
+function emptyScreenGraphic(text) {
+  return { type: 'text', left: 'center', top: 'middle', style: { text, fill: '#7ea6c8', fontSize: 13 } }
 }
 
 // ===== 省份下钻 =====
@@ -495,8 +471,7 @@ document.addEventListener('fullscreenchange', () => {
 function handleResize() {
   mapChart?.resize()
   rankChart?.resize()
-  pieChart?.resize()
-  indirectChart?.resize()
+  industryChart?.resize()
   provinceDirectChart?.resize()
   provinceIndirectChart?.resize()
   provincePieChart?.resize()
@@ -526,8 +501,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize)
   mapChart?.dispose()
   rankChart?.dispose()
-  pieChart?.dispose()
-  indirectChart?.dispose()
+  industryChart?.dispose()
   provinceDirectChart?.dispose()
   provinceIndirectChart?.dispose()
   provincePieChart?.dispose()
@@ -536,12 +510,14 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .screen-page {
-  min-height: 100vh;
+  /* 固定整屏高度：页面自身不滚动，面板内容超出时仅在面板内部滚动 */
+  height: 100vh;
+  overflow: hidden;
   background: radial-gradient(ellipse at 50% -10%, #10305a 0%, #0a1428 55%, #060d1c 100%);
   color: #e2f1ff;
   display: flex;
   flex-direction: column;
-  padding: 0 20px 20px;
+  padding: 0 20px 16px;
 }
 
 .screen-header {
@@ -747,14 +723,10 @@ onBeforeUnmount(() => {
 
 .rank-chart {
   flex: 1;
-  min-height: 200px;
+  min-height: 140px;
 }
 .structure-chart {
-  height: 230px;
-  flex-shrink: 0;
-}
-.indirect-chart {
-  height: 210px;
+  height: 220px;
   flex-shrink: 0;
 }
 /* 高度不足时面板内部滚动，避免图表互相挤压重叠 */
@@ -763,15 +735,26 @@ onBeforeUnmount(() => {
 }
 
 .map-panel {
+  position: relative;
   background: rgba(13, 43, 69, 0.35);
   border: 1px solid rgba(34, 211, 238, 0.15);
   border-radius: 12px;
   overflow: hidden;
 }
+/* 地图数据来源标注（右下角，不挡地图交互与 visualMap） */
+.map-attribution {
+  position: absolute;
+  right: 14px;
+  bottom: 8px;
+  z-index: 5;
+  font-size: 11px;
+  color: rgba(126, 166, 200, 0.65);
+  pointer-events: none;
+}
 .map-box {
   width: 100%;
   height: 100%;
-  min-height: 480px;
+  min-height: 0;
 }
 
 /* 下钻抽屉 */

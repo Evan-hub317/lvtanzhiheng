@@ -14,6 +14,18 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 接口文档：http://localhost:8000/docs
 
+### 主备模型（故障转移）
+
+RAG 问答与报告生成按顺序尝试主备两家模型：DeepSeek（主）→ 千问 qwen3.8-flash（备，百炼专属 MaaS 端点）。
+主模型连接失败/401/429/5xx 且尚未产出内容时自动切换；`.env` 配置：
+
+```ini
+DEEPSEEK_API_KEY=sk-xxx
+BACKUP_API_KEY=sk-xxx        # 备用模型 Key（不填则仅主模型）
+BACKUP_BASE_URL=...          # 默认已指向专属 MaaS 端点，通常无需修改
+BACKUP_MODEL=qwen3.8-flash
+```
+
 ## 接口一览
 
 | 接口 | 说明 |

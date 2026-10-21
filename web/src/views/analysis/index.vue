@@ -37,14 +37,14 @@
       </el-col>
       <el-col :xs="24" :md="8">
         <div class="tech-panel">
-          <div class="tech-panel-title">
-            {{ structTitle }}
-            <el-radio-group v-model="structType" size="small" class="struct-switch" @change="onStructTypeChange">
+          <div class="struct-switch-row">
+            <el-radio-group v-model="structType" size="small" @change="onStructTypeChange">
               <el-radio-button value="industry">行业</el-radio-button>
               <el-radio-button value="energy">能源（直接）</el-radio-button>
               <el-radio-button value="indirect">能源（间接）</el-radio-button>
             </el-radio-group>
           </div>
+          <div class="tech-panel-title">{{ structTitle }}</div>
           <div ref="pieRef" class="chart-box" v-loading="loading" element-loading-text="加载中…"></div>
         </div>
       </el-col>
@@ -422,6 +422,9 @@ function onIndustryChange() {
 }
 
 function onStructTypeChange() {
+  // 状态未就绪（年份未知）时不发请求：等首载完成后按当前所选类型渲染，
+  // 避免 year 缺失触发 400 报错提示
+  if (filters.year == null) return
   const seq = ++mainSeq
   loading.value = true
   Promise.all([loadStructure(seq)])
@@ -517,9 +520,10 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: #98a4b3;
 }
-.struct-switch {
-  margin-left: 12px;
-  white-space: nowrap;
+.struct-switch-row {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 8px;
 }
 .tech-panel-title {
   flex-wrap: wrap;

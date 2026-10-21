@@ -20,8 +20,9 @@ import java.nio.charset.StandardCharsets;
  * 因此通过 RestClient 拦截器统一关闭思考模式（V4 通过请求参数切换思考/非思考），
  * 使多轮工具调用（AI 分析助手核心链路）正常工作，响应也更快更省 token。
  * <p>
- * 注意：本 RestClient.Builder 为全局 @Primary，仅 DeepSeek 自动配置消费；
- * 项目内无其他 RestClient.Builder 使用方。
+ * 注意：本 RestClient.Builder 为全局 @Primary，DeepSeek 与备用模型（OpenAI 兼容
+ * 端点等）的 Starter 都会消费它。拦截器【仅对 DeepSeek 域名生效】，避免向备用
+ * 模型的请求体注入其不认识的 thinking 字段而被拒绝。
  */
 @Configuration
 public class DeepSeekAiConfig {
@@ -34,7 +35,10 @@ public class DeepSeekAiConfig {
                 .requestFactory(new BufferingClientHttpRequestFactory(new SimpleClientHttpRequestFactory()))
                 .requestInterceptor((request, body, execution) -> {
                     byte[] bytes = body;
-                    if (bytes != null && bytes.length > 0) {
+                    // 按域名限定：仅 DeepSeek 端点注入 thinking=disabled（备用模型请求原样透传）
+                    String host = request.getURI().getHost();
+                    boolean deepSeekHost = host != null && host.contains("deepseek");
+                    if (bytes != null && bytes.length > 0 && deepSeekHost) {
                         JSONObject json = JSONUtil.parseObj(new String(bytes, StandardCharsets.UTF_8));
                         if (!json.containsKey("thinking")) {
                             JSONObject thinking = new JSONObject();

@@ -60,6 +60,14 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
 DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-flash")
 
+# 备用模型（故障转移）：千问 qwen3.8-flash（百炼专属 MaaS 部署端点，OpenAI 兼容协议）
+BACKUP_API_KEY = os.getenv("BACKUP_API_KEY", "")
+BACKUP_BASE_URL = os.getenv(
+    "BACKUP_BASE_URL",
+    "https://ws-7ye0l4xplondv1u2.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+).rstrip("/")
+BACKUP_MODEL = os.getenv("BACKUP_MODEL", "qwen3.8-flash")
+
 # 情景仿真基准参数（与数据库预设情景一致：基准情景）
 BASE_COAL = 58.0      # 基准煤炭占比 %
 BASE_IND = 42.0       # 基准工业占 GDP 比重 %
@@ -565,6 +573,42 @@ def rag_chat(req: ChatReq):
     )
 
 
+def _chat_once(base_url, api_key, model, messages):
+    """单 provider 流式调用：产出内容增量；非 200 或连接失败抛异常。
+    调用方须保证「已产出内容后不再切换 provider」（流式输出不可中途换源）。"""
+    import httpx
+    with httpx.Client(timeout=60) as client:
+        with client.stream(
+            "POST", f"{base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"model": model, "messages": messages,
+                  "stream": True, "temperature": 0.3},
+        ) as resp:
+            if resp.status_code != 200:
+                # 流式模式下访问 resp.text 会抛 httpx 异常，须先 read()
+                detail = resp.read().decode("utf-8", "ignore")[:200]
+                raise RuntimeError(f"HTTP {resp.status_code}: {detail}")
+            for line in resp.iter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if payload == "[DONE]":
+                    break
+                # 兼容不同代理/模型的 SSE 事件：容忍 choices 为空、
+                # 仅含 usage 等非内容事件，逐行解析失败只跳过、不中断整段回答
+                try:
+                    data_obj = json.loads(payload)
+                    choices = data_obj.get("choices") or []
+                    if not choices:
+                        continue
+                    delta_obj = choices[0].get("delta") or {}
+                    delta = delta_obj.get("content", "") if isinstance(delta_obj, dict) else ""
+                except (ValueError, KeyError, IndexError, TypeError):
+                    continue
+                if delta:
+                    yield delta
+
+
 def _chat_stream(req: ChatReq):
     question = (req.question or "").strip()
     if not question:
@@ -624,54 +668,38 @@ def _chat_stream(req: ChatReq):
     # 首个 SSE 事件携带引用来源
     yield _sse({"sources": sources})
     answer_text = ""
-    stream_ok = False
-    try:
-        import httpx
-        with httpx.Client(timeout=60) as client:
-            with client.stream(
-                "POST", f"{DEEPSEEK_BASE_URL}/chat/completions",
-                headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
-                json={"model": DEEPSEEK_MODEL, "messages": messages,
-                      "stream": True, "temperature": 0.3},
-            ) as resp:
-                if resp.status_code != 200:
-                    detail = resp.text[:200]
-                    print("[algo] DeepSeek 返回非 200:", resp.status_code, detail)
-                    yield _sse({"content": f"（AI 服务调用失败：HTTP {resp.status_code}，{detail}）"})
-                else:
-                    stream_ok = True
-                    for line in resp.iter_lines():
-                        if not line or not line.startswith("data:"):
-                            continue
-                        payload = line[5:].strip()
-                        if payload == "[DONE]":
-                            break
-                        # 兼容不同代理/模型的 SSE 事件：容忍 choices 为空、
-                        # 仅含 usage 等非内容事件，逐行解析失败只跳过、不中断整段回答
-                        try:
-                            data_obj = json.loads(payload)
-                            choices = data_obj.get("choices") or []
-                            if not choices:
-                                print("[algo] 跳过无内容 SSE 事件:", payload[:200])
-                                continue
-                            delta_obj = choices[0].get("delta") or {}
-                            delta = delta_obj.get("content", "") if isinstance(delta_obj, dict) else ""
-                        except (ValueError, KeyError, IndexError, TypeError):
-                            print("[algo] 跳过无法解析的 SSE 事件:", payload[:200])
-                            continue
-                        if delta:
-                            answer_text += delta
-                            yield _sse({"content": delta})
-    except Exception as e:
-        print("[algo] DeepSeek 调用失败:", e)
+    # 主备模型顺序尝试：主模型失败且尚未产出任何内容时切换备用模型；
+    # 已产出内容后不再切换（流式输出不可中途换源）
+    providers = [
+        ("DeepSeek", DEEPSEEK_BASE_URL, DEEPSEEK_API_KEY, DEEPSEEK_MODEL),
+        ("qwen3.8-flash", BACKUP_BASE_URL, BACKUP_API_KEY, BACKUP_MODEL),
+    ]
+    last_err = None
+    for name, base_url, api_key, model in providers:
+        if not api_key:
+            continue
+        got = False
+        try:
+            for delta in _chat_once(base_url, api_key, model, messages):
+                got = True
+                answer_text += delta
+                yield _sse({"content": delta})
+        except Exception as e:
+            last_err = e
+            print(f"[algo] {name} 调用失败:", e)
+        if got:
+            break
+        if name != providers[-1][0]:
+            print(f"[algo] {name} 失败，切换备用模型…")
+    if not answer_text:
         # 已有完整回答时不再追加兜底话术（连接中断/尾部事件异常不应污染已生成的内容）
-        if not answer_text:
-            yield _sse({"content": f"（AI 服务调用异常：{type(e).__name__}）{fallback_answer(question)}"})
+        err = type(last_err).__name__ if last_err else "未配置"
+        yield _sse({"content": f"（AI 服务调用异常：{err}）{fallback_answer(question)}"})
 
     # ---- 引用过滤：仅保留回答中实际引用的分块，与问题无关的检索片段不再列出 ----
     # 模型被要求按【来源：《文件名》分块N】格式引用；未引用的分块视为与回答无关。
     # 注意必须“文档名 AND 分块号”同时出现才算引用：仅文档名命中会把同文档的其他分块误放行
-    if sources and stream_ok:
+    if sources and answer_text:
         cited = [s for s in sources
                  if s["doc_name"] in answer_text and f"分块{s['chunk_index']}" in answer_text]
         if cited or "未收录" in answer_text or "暂未" in answer_text:
@@ -698,33 +726,46 @@ REPORT_SYSTEM_PROMPT = (
 
 @app.post("/api/alg/report")
 def generate_report(req: ReportReq):
-    if not DEEPSEEK_API_KEY:
-        return {"code": 400, "msg": "AI 服务未配置（缺少 DEEPSEEK_API_KEY）"}
+    if not DEEPSEEK_API_KEY and not BACKUP_API_KEY:
+        return {"code": 400, "msg": "AI 服务未配置（缺少 DEEPSEEK_API_KEY / BACKUP_API_KEY）"}
     import httpx
     summary_text = json.dumps(req.summary, ensure_ascii=False, indent=1)
-    try:
-        with httpx.Client(timeout=120) as client:
-            resp = client.post(
-                f"{DEEPSEEK_BASE_URL}/chat/completions",
-                headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
-                json={"model": DEEPSEEK_MODEL,
-                      "messages": [
-                          {"role": "system", "content": REPORT_SYSTEM_PROMPT},
-                          {"role": "user", "content": f"【数据摘要】\n{summary_text}"},
-                      ],
-                      "stream": False, "temperature": 0.4},
-            )
-            if resp.status_code != 200:
-                return {"code": 500, "msg": f"AI 调用失败（HTTP {resp.status_code}）"}
-            content = resp.json()["choices"][0]["message"]["content"]
-            return {"code": 200, "data": {"content": content}}
-    except Exception as e:
-        print("[algo] 报告生成失败:", e)
-        return {"code": 500, "msg": f"AI 调用异常: {type(e).__name__}"}
+    # 主备模型顺序尝试（非流式，失败即切换）
+    providers = [
+        ("DeepSeek", DEEPSEEK_BASE_URL, DEEPSEEK_API_KEY, DEEPSEEK_MODEL),
+        ("qwen3.8-flash", BACKUP_BASE_URL, BACKUP_API_KEY, BACKUP_MODEL),
+    ]
+    last_err = None
+    for name, base_url, api_key, model in providers:
+        if not api_key:
+            continue
+        try:
+            with httpx.Client(timeout=120) as client:
+                resp = client.post(
+                    f"{base_url}/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={"model": model,
+                          "messages": [
+                              {"role": "system", "content": REPORT_SYSTEM_PROMPT},
+                              {"role": "user", "content": f"【数据摘要】\n{summary_text}"},
+                          ],
+                          "stream": False, "temperature": 0.4},
+                )
+                if resp.status_code != 200:
+                    raise RuntimeError(f"HTTP {resp.status_code}")
+                content = resp.json()["choices"][0]["message"]["content"]
+                return {"code": 200, "data": {"content": content}}
+        except Exception as e:
+            last_err = e
+            print(f"[algo] 报告生成失败（{name}）:", e)
+            if name != providers[-1][0]:
+                print("[algo] 切换备用模型重试报告生成…")
+    return {"code": 500, "msg": f"AI 调用异常: {type(last_err).__name__ if last_err else '未配置'}"}
 
 
 # ---------------- 健康检查 ----------------
 @app.get("/health")
 def health():
     return {"code": 200, "msg": "ok", "service": "algo",
-            "api_key_configured": bool(DEEPSEEK_API_KEY)}
+            "api_key_configured": bool(DEEPSEEK_API_KEY),
+            "backup_configured": bool(BACKUP_API_KEY)}

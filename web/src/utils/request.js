@@ -15,6 +15,9 @@ const request = axios.create({
   timeout: 15000
 })
 
+/** 401 处理去重：并发多个接口同时 401 时只弹一次提示、只跳一次登录页 */
+let handling401 = false
+
 request.interceptors.request.use(config => {
   const token = localStorage.getItem('satoken')
   if (token) {
@@ -31,8 +34,13 @@ request.interceptors.response.use(
     }
     if (data.code === 401) {
       localStorage.removeItem('satoken')
-      ElMessage.error(data.msg || '登录已过期，请重新登录')
-      router.push('/login')
+      if (!handling401 && router.currentRoute.value.path !== '/login') {
+        handling401 = true
+        ElMessage.error(data.msg || '登录已过期，请重新登录')
+        router.push('/login').finally(() => {
+          handling401 = false
+        })
+      }
       return Promise.reject(new Error(data.msg))
     }
     ElMessage.error(data.msg || '请求失败')

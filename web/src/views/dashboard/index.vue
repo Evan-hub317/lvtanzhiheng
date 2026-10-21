@@ -39,12 +39,12 @@
       </el-col>
     </el-row>
 
-    <!-- 图表区 -->
-    <el-row :gutter="16">
+    <!-- 图表区（弹性占满剩余高度） -->
+    <el-row :gutter="16" class="chart-row">
       <el-col :xs="24" :md="16">
         <div class="tech-panel">
           <div class="tech-panel-title">
-            年度碳排放总量趋势
+            全国年度碳排放总量趋势
             <el-tag v-if="!hasEmission" size="small" type="info" effect="plain">暂无数据</el-tag>
             <el-button v-if="hasEmission" link type="primary" class="detail-btn" @click="goAnalysis()">
               查看详情<el-icon><ArrowRight /></el-icon>
@@ -55,8 +55,15 @@
       </el-col>
       <el-col :xs="24" :md="8">
         <div class="tech-panel">
+          <div class="struct-switch-row">
+            <el-radio-group v-model="structType" size="small" @change="onStructTypeChange">
+              <el-radio-button value="industry">行业</el-radio-button>
+              <el-radio-button value="energy">能源（直接）</el-radio-button>
+              <el-radio-button value="indirect">能源（间接）</el-radio-button>
+            </el-radio-group>
+          </div>
           <div class="tech-panel-title">
-            {{ chartYear || '-' }} 年行业排放结构
+            {{ structTitle }}
             <el-tag v-if="!hasEmission" size="small" type="info" effect="plain">暂无数据</el-tag>
             <el-button v-if="hasEmission" link type="primary" class="detail-btn" @click="goAnalysis()">
               查看详情<el-icon><ArrowRight /></el-icon>
@@ -77,7 +84,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { regionListApi, industryListApi, energyListApi, factorListApi } from '@/api/dict'
 import { dataStatusApi, generateDataApi } from '@/api/data'
 import { executeCalcApi } from '@/api/calc'
-import { trendApi, structureApi, kpiApi } from '@/api/analysis'
+import { trendApi, structureApi, energyStructureApi, indirectApi, kpiApi } from '@/api/analysis'
 import { useUserStore } from '@/store/user'
 
 const userStore = useUserStore()
@@ -104,9 +111,51 @@ const status = ref({})
 const kpi = ref(null)
 const hasEmission = computed(() => (status.value.emissionCount || 0) > 0)
 const hasData = computed(() => (status.value.totalCount || 0) > 0 && status.value.maxYear != null)
-const maxYear = computed(() => status.value.maxYear ?? null)
 // 图表展示年：年度图表只用最后一个完整年（当年未过完不参与），标题与数据同源
 const chartYear = computed(() => status.value.maxFullYear ?? status.value.maxYear ?? null)
+
+// ===== 结构图（行业 / 能源直接 / 能源间接 卡片切换，全国口径） =====
+const structType = ref('industry')
+const structTitle = computed(() => {
+  const y = chartYear.value ?? '-'
+  if (structType.value === 'industry') return `${y} 年全国行业排放结构`
+  if (structType.value === 'energy') return `${y} 年全国能源结构（直接排放）`
+  return `${y} 年全国间接排放结构`
+})
+
+/** 结构图请求序号：只有最新一次请求的响应才渲染，避免首载与切换的响应竞态互相覆盖 */
+let structSeq = 0
+
+async function loadStructureData() {
+  // 状态未就绪（年份未知）时不发请求：等首载完成后按「当前所选类型」加载，
+  // 避免 year 缺失触发 400 报错提示
+  if (chartYear.value == null) return
+  const seq = ++structSeq
+  const type = structType.value   // 类型快照：渲染与点击行为均以本次请求的类型为准
+  const params = { regionId: 1, year: chartYear.value }
+  let res = null
+  if (type === 'industry') {
+    res = await structureApi(params)
+  } else if (type === 'energy') {
+    res = await energyStructureApi(params)
+  } else {
+    res = await indirectApi(params)
+  }
+  if (seq === structSeq) {
+    renderPieChart(res.data, type)
+  }
+}
+
+async function onStructTypeChange() {
+  // 状态未就绪：不动转圈，等首载完成后按当前所选类型加载
+  if (chartYear.value == null) return
+  beginLoad()
+  try {
+    await loadStructureData()
+  } finally {
+    endLoad()
+  }
+}
 
 // ===== 统计卡片 =====
 const statCards = reactive([
@@ -136,6 +185,18 @@ let trendChart = null
 let pieChart = null
 /** 图表数据加载中（转圈遮罩） */
 const loading = ref(false)
+/** 并发加载计数：首载与切换的请求交错时，全部完成后才关闭转圈 */
+let pendingLoads = 0
+function beginLoad() {
+  pendingLoads++
+  loading.value = true
+}
+function endLoad() {
+  pendingLoads = Math.max(0, pendingLoads - 1)
+  if (pendingLoads === 0) {
+    loading.value = false
+  }
+}
 
 function renderTrendChart(rows) {
   trendChart = trendChart || echarts.init(trendRef.value)
@@ -200,10 +261,10 @@ function renderTrendChart(rows) {
   })
 }
 
-function renderPieChart(rows) {
+function renderPieChart(rows, type) {
   pieChart = pieChart || echarts.init(pieRef.value)
   if (!rows?.length) {
-    pieChart.setOption({}, true)
+    pieChart.setOption({ graphic: null }, true)
     pieChart.setOption({
       graphic: {
         type: 'text',
@@ -216,32 +277,41 @@ function renderPieChart(rows) {
   }
   pieChart.setOption({
     graphic: null,
-    tooltip: { trigger: 'item', formatter: '{b}：{c} 万吨（{d}%）' },
-    legend: { bottom: 0, icon: 'circle', textStyle: { color: '#51606e' } },
-    color: ['#0ea5e9', '#06b6d4', '#10b981', '#8b5cf6', '#f59e0b'],
+    tooltip: { trigger: 'item', formatter: '{b}：{c} 亿吨（{d}%）' },
+    legend: { bottom: 0, type: 'scroll', icon: 'circle', itemGap: 10, textStyle: { color: '#51606e', fontSize: 11 } },
+    color: ['#0ea5e9', '#06b6d4', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#64748b', '#f97316'],
     series: [
       {
         type: 'pie',
-        radius: ['42%', '68%'],
-        center: ['50%', '44%'],
+        // 半径与中心同分析页：饼体收缩留出标签空间，避免块标签被容器裁切
+        radius: ['38%', '58%'],
+        center: ['50%', '42%'],
         itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-        label: { formatter: '{b}\n{d}%', color: '#51606e' },
-        data: rows.map(r => ({ name: r.industryName, value: Number((r.emission / 10000).toFixed(1)), industryId: r.industryId }))
+        label: { formatter: '{b}\n{d}%', color: '#51606e', fontSize: 11 },
+        labelLine: { length: 10, length2: 6 },
+        data: rows.map(r => ({
+          name: r.industryName || r.energyName,
+          value: Number((r.emission / 1e8).toFixed(2))
+        }))
       }
     ]
-  })
-  // 点击扇区 → 跳分析页并联动该行业筛选
+  }, true)  // notMerge：切换结构类型时全量替换，避免旧图残留
+  // 点击扇区 → 跳分析页（行业类型联动行业筛选；能源类型仅跳转）
   pieChart.off('click')
   pieChart.on('click', params => {
-    const item = rows.find(r => r.industryName === params.name)
-    if (item) {
-      goAnalysis({ industryId: item.industryId })
+    if (type === 'industry') {
+      const item = rows.find(r => r.industryName === params.name)
+      if (item) {
+        goAnalysis({ industryId: item.industryId })
+      }
+    } else {
+      goAnalysis()
     }
   })
 }
 
 async function loadDashboardData() {
-  loading.value = true
+  beginLoad()
   try {
     const res = await dataStatusApi()
     status.value = res.data
@@ -254,13 +324,12 @@ async function loadDashboardData() {
     // 年度分析一律使用最后一个完整年（当年未过完不参与趋势/KPI）
     const endYear = chartYear.value
     if (hasEmission.value) {
-      const [trendRes, structureRes, kpiRes] = await Promise.all([
+      const [trendRes, kpiRes] = await Promise.all([
         trendApi({ regionId: 1, startYear, endYear }),
-        structureApi({ regionId: 1, year: endYear }),
-        kpiApi({ regionId: 1, year: endYear })
+        kpiApi({ regionId: 1, year: endYear }),
+        loadStructureData()
       ])
       renderTrendChart(trendRes.data)
-      renderPieChart(structureRes.data)
       kpi.value = kpiRes.data
     } else {
       renderTrendChart([])
@@ -268,7 +337,7 @@ async function loadDashboardData() {
       ElMessage.info('已有活动数据，请点击「执行核算」生成核算结果')
     }
   } finally {
-    loading.value = false
+    endLoad()
   }
 }
 
@@ -332,10 +401,20 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* 占满视口可用高度：100vh - 顶栏 60px - 内容区上下内边距 32px；页面自身不滚动 */
 .dashboard {
+  height: calc(100vh - 92px);
+  min-height: 560px;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
+}
+
+/* 图表行：吸收剩余高度，图表随之撑到页面底部 */
+.chart-row {
+  flex: 1;
+  min-height: 0;
 }
 
 .welcome-bar {
@@ -344,19 +423,19 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  padding: 20px 28px;
+  padding: 14px 24px;
   border-radius: 12px;
   color: #fff;
   background: linear-gradient(100deg, #0b3354 0%, #0a6f8c 55%, #0f7a5c 100%);
   box-shadow: 0 6px 20px rgba(9, 55, 86, 0.25);
 }
 .welcome-bar h2 {
-  margin: 0 0 8px;
-  font-size: 20px;
+  margin: 0 0 4px;
+  font-size: 18px;
 }
 .welcome-bar p {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   color: rgba(255, 255, 255, 0.75);
 }
 .welcome-right {
@@ -399,35 +478,42 @@ onBeforeUnmount(() => {
 }
 
 .stat-row {
-  row-gap: 16px;
+  row-gap: 12px;
 }
 .tech-stat-card {
-  padding: 20px;
-  min-height: 108px;
+  padding: 14px 18px;
+  min-height: 84px;
 }
 .stat-icon {
-  width: 46px;
-  height: 46px;
-  border-radius: 12px;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: rgba(255, 255, 255, 0.18);
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 .stat-value {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
   line-height: 1;
 }
 .stat-label {
-  margin-top: 8px;
+  margin-top: 6px;
   font-size: 13px;
   color: rgba(255, 255, 255, 0.85);
 }
 
+/* 图表卡片等高：左侧趋势卡拉伸到与右侧结构卡（含切换行）一致，两图底部对齐 */
+.tech-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
 .chart-box {
-  height: 320px;
+  flex: 1;
+  min-height: 200px;
 }
 
 .detail-btn {
@@ -435,5 +521,11 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+}
+
+.struct-switch-row {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 8px;
 }
 </style>

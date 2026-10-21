@@ -23,6 +23,7 @@ import com.smart.mapper.DimRegionMapper;
 import com.smart.mapper.FactEnergyMonthMapper;
 import com.smart.service.AgentService;
 import com.smart.service.AgentToolService;
+import com.smart.service.AiRouter;
 import com.smart.service.AnalysisService;
 import com.smart.service.AlertService;
 import com.smart.service.CalcService;
@@ -39,7 +40,6 @@ import com.smart.vo.StructureVO;
 import com.smart.vo.TrendVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
@@ -49,6 +49,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.deepseek.DeepSeekAssistantMessage;
 import org.springframework.ai.deepseek.DeepSeekChatOptions;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.method.MethodToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -100,23 +101,10 @@ public class AgentServiceImpl implements AgentService {
     private final AgentSessionMapper sessionMapper;
     private final FactEnergyMonthMapper energyMonthMapper;
     private final ResourceLoader resourceLoader;
-    private final ChatClient.Builder chatClientBuilder;
+    /** 主备模型路由（DeepSeek 优先，故障按分类回退 qwen3.8-flash） */
+    private final AiRouter aiRouter;
     /** 14 个分析工具（@Tool 声明式注册，schema 由注解生成；执行仍在手工循环内逐轮调用） */
     private final AgentToolService toolService;
-
-    /** ChatClient 懒构建（Builder 由 Spring AI 自动配置注入） */
-    private volatile ChatClient chatClient;
-
-    private ChatClient chatClient() {
-        if (chatClient == null) {
-            synchronized (this) {
-                if (chatClient == null) {
-                    chatClient = chatClientBuilder.build();
-                }
-            }
-        }
-        return chatClient;
-    }
 
     // ============ 系统提示词与工具注册 ============
     // 提示词统一放在 resources/prompts/*.st，通过 Spring AI PromptTemplate 渲染（便于调整与复用）
@@ -337,12 +325,10 @@ public class AgentServiceImpl implements AgentService {
 
     private JSONObject callDeepSeek(List<Map<String, Object>> messages, boolean withTools) {
         try {
-            ChatResponse resp = chatClient()
-                    .prompt()
-                    .messages(toSpringMessages(messages))
-                    .options(buildOptions(withTools))
-                    .call()
-                    .chatResponse();
+            ChatResponse resp = aiRouter.callWithFallback(
+                    toSpringMessages(messages),
+                    buildDeepSeekOptions(withTools),
+                    buildQwenOptions(withTools));
             Message out = resp.getResult().getOutput();
             if (out == null) {
                 log.error("大模型响应为空");
@@ -416,12 +402,22 @@ public class AgentServiceImpl implements AgentService {
         return out;
     }
 
-    private DeepSeekChatOptions buildOptions(boolean withTools) {
+    private DeepSeekChatOptions buildDeepSeekOptions(boolean withTools) {
         DeepSeekChatOptions.Builder b = DeepSeekChatOptions.builder().temperature(0.3);
         if (withTools) {
             b.toolCallbacks(buildToolCallbacks());
         }
         // 关键：关闭框架内部工具执行——工具由业务层手工执行并逐轮推送 SSE 事件（执行链路可视化）
+        b.internalToolExecutionEnabled(false);
+        return b.build();
+    }
+
+    /** 备用模型（千问）选项：与主模型同构（同一套 @Tool schema，内部工具执行同样关闭） */
+    private OpenAiChatOptions buildQwenOptions(boolean withTools) {
+        OpenAiChatOptions.Builder b = OpenAiChatOptions.builder().temperature(0.3);
+        if (withTools) {
+            b.toolCallbacks(buildToolCallbacks());
+        }
         b.internalToolExecutionEnabled(false);
         return b.build();
     }

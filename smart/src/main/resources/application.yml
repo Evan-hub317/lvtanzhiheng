@@ -14,6 +14,15 @@ spring:
       chat:
         options:
           model: deepseek-flash
+    # 备用模型：千问 qwen3.8-flash（百炼专属 MaaS 部署端点，故障转移用）
+    # 注意：Spring AI OpenAI 客户端会在 base-url 后自动拼接 /v1/chat/completions，
+    # 因此这里不能带 /v1，否则与兼容端点路径重复导致 404
+    openai:
+      base-url: https://ws-7ye0l4xplondv1u2.cn-beijing.maas.aliyuncs.com/compatible-mode
+      api-key: ""
+      chat:
+        options:
+          model: qwen3.8-flash
   servlet:
     multipart:
       # 知识库文档上传限制（扫描版 PDF 体积较大）
@@ -47,6 +56,9 @@ logging:
     root: info
     org.mybatis: warn
     com.baomidou: warn
+    # Spring AI 重试框架：每次主模型失败（401/5xx）都打整段堆栈，噪声大；
+    # 失败与回退信息已由 AiRouter 单行日志记录，这里降为 error 只保留真实异常
+    org.springframework.ai.retry.autoconfigure: error
   global-config:
     banner: false
     db-config:
