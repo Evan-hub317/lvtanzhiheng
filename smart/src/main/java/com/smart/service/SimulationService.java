@@ -42,4 +42,14 @@ public interface SimulationService {
      * 情景详情（含轨迹）
      */
     ScenarioVO detail(long id);
+
+    /**
+     * 修改情景名称
+     */
+    void rename(long id, String scenarioName);
+
+    /**
+     * 删除情景（连同其轨迹结果）
+     */
+    void delete(long id);
 }

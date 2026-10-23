@@ -11,9 +11,11 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -72,5 +74,19 @@ public class SimulationController {
     @GetMapping("/{id}")
     public Result<ScenarioVO> detail(@PathVariable long id) {
         return Result.ok(simulationService.detail(id));
+    }
+
+    @Operation(summary = "修改情景名称")
+    @PutMapping("/{id}/name")
+    public Result<Void> rename(@PathVariable long id, @RequestParam String name) {
+        simulationService.rename(id, name);
+        return Result.ok();
+    }
+
+    @Operation(summary = "删除情景（连同轨迹）")
+    @DeleteMapping("/{id}")
+    public Result<Void> delete(@PathVariable long id) {
+        simulationService.delete(id);
+        return Result.ok();
     }
 }

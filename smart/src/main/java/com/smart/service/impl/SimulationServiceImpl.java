@@ -320,6 +320,29 @@ public class SimulationServiceImpl implements SimulationService {
     }
 
     @Override
+    public void rename(long id, String scenarioName) {
+        ScenarioRecord record = scenarioMapper.selectById(id);
+        if (record == null) {
+            throw new BizException("情景不存在");
+        }
+        record.setScenarioName(scenarioName);
+        scenarioMapper.updateById(record);
+        log.info("情景已重命名：id={} → {}", id, scenarioName);
+    }
+
+    @Override
+    public void delete(long id) {
+        ScenarioRecord record = scenarioMapper.selectById(id);
+        if (record == null) {
+            throw new BizException("情景不存在");
+        }
+        // 先删轨迹明细，再删情景本身
+        simResultMapper.delete(new LambdaQueryWrapper<SimResult>().eq(SimResult::getScenarioId, id));
+        scenarioMapper.deleteById(id);
+        log.info("情景已删除：id={}（{}）", id, record.getScenarioName());
+    }
+
+    @Override
     public ScenarioVO detail(long id) {
         ScenarioRecord record = scenarioMapper.selectById(id);
         if (record == null) {
