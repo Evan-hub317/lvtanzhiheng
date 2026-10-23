@@ -11,3 +11,7 @@ export const saveScenarioApi = data => request.post('/sim/save', data, { timeout
 export const scenarioListApi = params => request.get('/sim/list', { params })
 
 export const scenarioDetailApi = id => request.get(`/sim/${id}`)
+
+export const renameScenarioApi = (id, name) => request.put(`/sim/${id}/name`, null, { params: { name } })
+
+export const deleteScenarioApi = id => request.delete(`/sim/${id}`)

@@ -16,6 +16,7 @@
             <el-select v-model="preset" size="small" style="width: 150px" @change="onPresetChange">
               <el-option v-for="p in presets" :key="p.value" :label="p.label" :value="p.value" />
             </el-select>
+            <el-button link type="primary" size="small" @click="handleResetPreset">恢复默认</el-button>
           </div>
 
           <div class="slider-item">
@@ -56,26 +57,32 @@
           </p>
         </div>
 
-        <!-- 已保存情景 -->
+        <!-- 已保存情景（高度自适应剩余空间，列表内部滚动） -->
         <div class="tech-panel scenario-panel" v-loading="scenarioLoading" element-loading-text="情景加载中…">
           <div class="tech-panel-title">已保存情景（勾选叠加对比）</div>
-          <el-checkbox-group v-model="checkedScenarios" @change="onCheckedChange">
-            <div v-for="s in scenarios" :key="s.id" class="scenario-row">
-              <el-checkbox :value="s.id">
-                <span class="scenario-name">{{ s.scenarioName }}</span>
-                <el-tag size="small" :type="s.peakYear ? 'success' : 'warning'" effect="light" round>
-                  {{ s.peakYear ? s.peakYear + ' 达峰' : '未达峰' }}
-                </el-tag>
-              </el-checkbox>
-            </div>
-          </el-checkbox-group>
-          <el-empty v-if="!scenarios.length" description="暂无保存的情景" :image-size="60" />
+          <div class="scenario-list">
+            <el-checkbox-group v-model="checkedScenarios" @change="onCheckedChange">
+              <div v-for="s in scenarios" :key="s.id" class="scenario-row">
+                <el-checkbox :value="s.id">
+                  <span class="scenario-name">{{ s.scenarioName }}</span>
+                  <el-tag size="small" :type="s.peakYear ? 'success' : 'warning'" effect="light" round>
+                    {{ s.peakYear ? s.peakYear + ' 达峰' : '未达峰' }}
+                  </el-tag>
+                </el-checkbox>
+                <span class="scenario-ops">
+                  <el-icon class="op-icon" title="重命名" @click="handleRenameScenario(s)"><EditPen /></el-icon>
+                  <el-icon class="op-icon op-del" title="删除" @click="handleDeleteScenario(s)"><Delete /></el-icon>
+                </span>
+              </div>
+            </el-checkbox-group>
+            <el-empty v-if="!scenarios.length" description="暂无保存的情景" :image-size="40" class="scenario-empty" />
+          </div>
         </div>
       </el-col>
 
       <!-- 右侧图表 -->
       <el-col :xs="24" :md="17">
-        <div class="tech-panel">
+        <div class="tech-panel chart-panel">
           <div class="tech-panel-title">
             {{ regionName }} · 碳排放预测与仿真推演
             <el-tag v-if="method" size="small" type="info" effect="plain">
@@ -106,10 +113,10 @@
           </div>
         </div>
 
-        <!-- 情景对比表 -->
-        <div class="tech-panel" style="margin-top: 16px">
+        <!-- 情景对比表（固定高度，行数多时表内滚动） -->
+        <div class="tech-panel compare-panel">
           <div class="tech-panel-title">情景对比</div>
-          <el-table :data="compareRows" size="small" stripe>
+          <el-table :data="compareRows" size="small" stripe :max-height="170">
             <el-table-column prop="name" label="情景" min-width="130" />
             <el-table-column label="煤炭占比" width="100" align="right">
               <template #default="{ row }">{{ row.coalRatio }}%</template>
@@ -140,13 +147,16 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+
+// keep-alive 标签页缓存名（布局 include 列表按此匹配）
+defineOptions({ name: 'SimulationPage' })
 import * as echarts from 'echarts'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { regionListApi } from '@/api/dict'
 import RegionSelect from '@/components/RegionSelect.vue'
 import { dataStatusApi } from '@/api/data'
-import { predictApi, simulateApi, saveScenarioApi, scenarioListApi, scenarioDetailApi, baseParamApi } from '@/api/sim'
+import { predictApi, simulateApi, saveScenarioApi, scenarioListApi, scenarioDetailApi, baseParamApi, renameScenarioApi, deleteScenarioApi } from '@/api/sim'
 
 // ===== 基础数据 =====
 const regions = ref([])
@@ -160,7 +170,7 @@ const presets = [
   { value: 1, label: '基准情景（维持现状）', coalMul: 1.0, indMul: 1.0, tech: 1.5 },
   { value: 2, label: '低碳情景（能源转型）', coalMul: 0.94, indMul: 0.96, tech: 2.5 },
   { value: 3, label: '强化低碳情景（深度减排）', coalMul: 0.85, indMul: 0.92, tech: 3.5 },
-  { value: 0, label: '自定义情景', coalMul: 1.0, indMul: 1.0, tech: 2.0 }
+  { value: 0, label: '自定义情景', coalMul: 1.0, indMul: 1.0, tech: 1.5 }
 ]
 const preset = ref(1)
 const params = reactive({ coalRatio: 58, industryRatio: 42, techEfficiency: 1.5, gdpGrowth: 5.0 })
@@ -175,6 +185,18 @@ function onPresetChange() {
     params.techEfficiency = p.tech
   }
   runSimulate()
+}
+
+/** 恢复场景预设默认值：滑杆重置为所选预设的标准参数并立即重算；
+ *  自定义预设（滑杆拖过）时回落到该区域基准情景默认值（基准参数、能效 1.5%） */
+function handleResetPreset() {
+  if (preset.value === 0) {
+    params.coalRatio = baseParam.value.coalRatio
+    params.industryRatio = baseParam.value.industryRatio
+    params.techEfficiency = 1.5
+  } else {
+    onPresetChange()
+  }
 }
 
 async function loadBaseParam() {
@@ -250,6 +272,48 @@ async function handleSave() {
   }
 }
 
+/** 重命名已保存情景 */
+async function handleRenameScenario(s) {
+  let name
+  try {
+    const { value } = await ElMessageBox.prompt('请输入新的情景名称', '重命名情景', {
+      inputValue: s.scenarioName,
+      inputValidator: v => (v && v.trim() ? true : '名称不能为空'),
+      confirmButtonText: '保存',
+      cancelButtonText: '取消'
+    })
+    name = value.trim()
+  } catch (e) {
+    return   // 用户取消
+  }
+  await renameScenarioApi(s.id, name)
+  ElMessage.success('已重命名')
+  await loadScenarios()
+}
+
+/** 删除已保存情景（连同轨迹） */
+async function handleDeleteScenario(s) {
+  try {
+    await ElMessageBox.confirm(`删除情景「${s.scenarioName}」及其轨迹数据？`, '删除情景', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消'
+    })
+  } catch (e) {
+    return
+  }
+  // 删除前：若该情景已勾选叠加在图上，先从图中清除其曲线（本地状态先行，视觉即时反馈）
+  const wasChecked = checkedScenarios.value.includes(s.id)
+  checkedScenarios.value = checkedScenarios.value.filter(id => id !== s.id)
+  scenarioCache.delete(s.id)
+  if (wasChecked) {
+    renderChart()
+  }
+  await deleteScenarioApi(s.id)
+  ElMessage.success('已删除')
+  await loadScenarios()
+}
+
 async function onCheckedChange(ids) {
   // 新勾选的场景拉取轨迹（预测图上转圈等待）
   chartLoading.value = true
@@ -308,7 +372,7 @@ function formatYi(v) {
 }
 
 function renderChart() {
-  chart = chart || echarts.init(chartRef.value)
+  chart = echarts.getInstanceByDom(chartRef.value) || echarts.init(chartRef.value)
   const series = []
   const legend = []
 
@@ -513,6 +577,10 @@ function handleResize() {
   chart?.resize()
 }
 
+// keep-alive 恢复页面时按当前尺寸重绘图表：数据若在页面离屏（deactivated）期间
+// 返回并渲染，图表容器尺寸为 0，必须激活后重绘，否则切回来是空白图表
+onActivated(handleResize)
+
 onMounted(() => {
   init()
   window.addEventListener('resize', handleResize)
@@ -530,10 +598,23 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  /* 占满视口可用高度：100vh - 顶栏 60 - 内容区边距 32；页面自身不滚动 */
+  height: calc(100vh - 92px);
+  min-height: 620px;
+  overflow: hidden;
+}
+.sim-page :deep(.el-row),
+.sim-page :deep(.el-col) {
+  height: 100%;
+}
+/* 左右两列均为纵向弹性布局：上图下卡/上控下景 */
+.sim-page :deep(.el-col) {
+  display: flex;
+  flex-direction: column;
 }
 
-.control-panel,
-.scenario-panel {
+.control-panel {
+  flex-shrink: 0;
   margin-bottom: 16px;
 }
 
@@ -547,6 +628,17 @@ onBeforeUnmount(() => {
   font-size: 13px;
   color: #51606e;
   width: 60px;
+  flex-shrink: 0;
+}
+/* 区域选择：省市两个下拉始终同行（省右边），平分剩余宽度，窄屏自动收缩 */
+.control-panel :deep(.region-select) {
+  flex: 1;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.control-panel :deep(.region-select .el-select) {
+  flex: 1;
+  min-width: 0;
 }
 
 .slider-item {
@@ -575,18 +667,81 @@ onBeforeUnmount(() => {
 }
 
 .scenario-row {
+  display: flex;
+  align-items: center;
   padding: 6px 0;
+}
+.scenario-ops {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.op-icon {
+  cursor: pointer;
+  color: #98a4b3;
+  font-size: 14px;
+  transition: color 0.2s;
+}
+.op-icon:hover {
+  color: #0ea5e9;
+}
+.op-del:hover {
+  color: #f56c6c;
 }
 .scenario-name {
   margin-right: 8px;
   font-size: 13px;
 }
 
+.chart-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .sim-chart-wrap {
   position: relative;
+  flex: 1;
+  min-height: 0;
 }
 .sim-chart {
-  height: 460px;
+  height: 100%;
+  min-height: 240px;
+}
+/* 已保存情景：占满左列剩余高度，列表内部滚动 */
+.scenario-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.scenario-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* 空态占位：紧凑且垂直居中于卡片剩余空间 */
+.scenario-empty {
+  padding: 6px 0;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.scenario-empty :deep(.el-empty__image) {
+  height: 44px;
+}
+.scenario-empty :deep(.el-empty__description) {
+  margin-top: 2px;
+}
+/* 情景对比：固定高度卡片，行数多时表内滚动（el-table max-height 生效） */
+.compare-panel {
+  flex-shrink: 0;
+  margin-top: 16px;
+  height: 240px;
+  display: flex;
+  flex-direction: column;
 }
 .sim-overlay {
   position: absolute;

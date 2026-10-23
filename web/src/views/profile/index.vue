@@ -50,9 +50,14 @@
                   <template #prefix><el-icon><EditPen /></el-icon></template>
                 </el-input>
               </el-form-item>
-              <el-button type="primary" class="block-btn" :loading="savingProfile" @click="handleSaveProfile">
-                <el-icon style="margin-right: 4px"><Check /></el-icon>保存资料
-              </el-button>
+              <div class="btn-row">
+                <el-button type="primary" class="flex-btn" :loading="savingProfile" @click="handleSaveProfile">
+                  <el-icon style="margin-right: 4px"><Check /></el-icon>保存资料
+                </el-button>
+                <el-button class="flex-btn" :disabled="savingProfile" @click="handleResetProfile">
+                  <el-icon style="margin-right: 4px"><RefreshLeft /></el-icon>重置
+                </el-button>
+              </div>
             </el-form>
           </div>
           <div class="tech-panel form-panel form-pwd">
@@ -75,9 +80,14 @@
                   <template #prefix><el-icon><CircleCheck /></el-icon></template>
                 </el-input>
               </el-form-item>
-              <el-button type="primary" class="block-btn" :loading="savingPwd" @click="handleChangePassword">
-                <el-icon style="margin-right: 4px"><Key /></el-icon>修改密码
-              </el-button>
+              <div class="btn-row">
+                <el-button type="primary" class="flex-btn" :loading="savingPwd" @click="handleChangePassword">
+                  <el-icon style="margin-right: 4px"><Key /></el-icon>修改密码
+                </el-button>
+                <el-button class="flex-btn" :disabled="savingPwd" @click="handleResetPwd">
+                  <el-icon style="margin-right: 4px"><RefreshLeft /></el-icon>重置
+                </el-button>
+              </div>
             </el-form>
           </div>
         </div>
@@ -88,6 +98,9 @@
 
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
+
+// keep-alive 标签页缓存名（布局 include 列表按此匹配）
+defineOptions({ name: 'ProfilePage' })
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { changePasswordApi, updateProfileApi } from '@/api/user'
@@ -138,6 +151,11 @@ async function handleSaveProfile() {
   }
 }
 
+/** 重置基本资料：姓名恢复为当前账号信息 */
+function handleResetProfile() {
+  profileForm.realName = userStore.userInfo?.realName || ''
+}
+
 const pwdFormRef = ref()
 const savingPwd = ref(false)
 const pwdForm = reactive({ oldPassword: '', newPassword: '', confirmPassword: '' })
@@ -176,10 +194,18 @@ async function handleChangePassword() {
     savingPwd.value = false
   }
 }
+
+/** 重置修改密码表单：清空输入并清除全部校验提示 */
+function handleResetPwd() {
+  pwdForm.oldPassword = ''
+  pwdForm.newPassword = ''
+  pwdForm.confirmPassword = ''
+  pwdFormRef.value?.clearValidate()
+}
 </script>
 
 <style scoped>
-/* 占满视口可用高度：100vh - 顶栏 60px - 内容区上下内边距 32px */
+/* 占满视口可用高度：100vh - 顶栏 60 - 内容区边距 32 */
 .profile-page {
   height: calc(100vh - 92px);
   min-height: 620px;
@@ -368,8 +394,13 @@ async function handleChangePassword() {
 .profile-form :deep(.el-form-item) {
   margin-bottom: 14px;
 }
-.block-btn {
-  width: 100%;
+.btn-row {
+  display: flex;
+  gap: 10px;
   margin-top: auto;
+}
+.flex-btn {
+  flex: 1;
+  margin-left: 0;
 }
 </style>

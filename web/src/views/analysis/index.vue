@@ -109,7 +109,10 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+
+// keep-alive 标签页缓存名（布局 include 列表按此匹配）
+defineOptions({ name: 'AnalysisPage' })
 import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { regionListApi, industryListApi, energyListApi } from '@/api/dict'
@@ -160,7 +163,7 @@ const rankRef = ref()
 let trendChart, pieChart, monthChart, rankChart
 
 function renderTrend(rows) {
-  trendChart = trendChart || echarts.init(trendRef.value)
+  trendChart = echarts.getInstanceByDom(trendRef.value) || echarts.init(trendRef.value)
   if (!rows?.length) {
     trendChart.setOption({ graphic: emptyGraphic('暂无数据') }, true)
     return
@@ -204,7 +207,7 @@ function renderTrend(rows) {
 }
 
 function renderStructure(rows) {
-  pieChart = pieChart || echarts.init(pieRef.value)
+  pieChart = echarts.getInstanceByDom(pieRef.value) || echarts.init(pieRef.value)
   if (!rows?.length) {
     pieChart.setOption({ graphic: emptyGraphic('暂无数据') }, true)
     return
@@ -239,7 +242,7 @@ function renderStructure(rows) {
 }
 
 function renderMonthly(rows) {
-  monthChart = monthChart || echarts.init(monthRef.value)
+  monthChart = echarts.getInstanceByDom(monthRef.value) || echarts.init(monthRef.value)
   if (!rows?.length) {
     monthChart.setOption({ graphic: emptyGraphic('暂无数据') }, true)
     return
@@ -275,7 +278,7 @@ function renderRanking(rows) {
   const rowHeight = 36
   const count = rows?.length || 0
   rankRef.value.style.height = Math.max(300, count * rowHeight + 24) + 'px'
-  rankChart = rankChart || echarts.init(rankRef.value)
+  rankChart = echarts.getInstanceByDom(rankRef.value) || echarts.init(rankRef.value)
   if (!rows?.length) {
     rankChart.setOption({ graphic: emptyGraphic('暂无数据') }, true)
     return
@@ -453,6 +456,10 @@ function handleResize() {
   monthChart?.resize()
   rankChart?.resize()
 }
+
+// keep-alive 恢复页面时按当前尺寸重绘图表：数据若在页面离屏（deactivated）期间
+// 返回并渲染，图表容器尺寸为 0，必须激活后重绘，否则切回来是空白图表
+onActivated(handleResize)
 
 onMounted(async () => {
   // 进入页面立即转圈：首屏的字典/状态查询同样耗时，不能空窗等待

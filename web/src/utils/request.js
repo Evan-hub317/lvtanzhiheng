@@ -33,7 +33,13 @@ request.interceptors.response.use(
       return data
     }
     if (data.code === 401) {
+      const hadToken = !!localStorage.getItem('satoken')
       localStorage.removeItem('satoken')
+      // 本地已无 token（刚退出登录）时，401 是登出前在途请求被吊销后的必然结果，
+      // 静默拒绝、不弹提示不跳转（避免退出登录瞬间弹「未登录或登录已过期」）
+      if (!hadToken) {
+        return Promise.reject(new Error(data.msg))
+      }
       if (!handling401 && router.currentRoute.value.path !== '/login') {
         handling401 = true
         ElMessage.error(data.msg || '登录已过期，请重新登录')

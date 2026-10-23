@@ -51,11 +51,11 @@
               <div class="report-charts">
                 <div class="chart-panel">
                   <div class="chart-title">{{ chart1Title }}</div>
-                  <div ref="trendRef" class="chart-box"></div>
+                  <div ref="trendRef" class="chart-box" v-loading="chartsLoading" element-loading-text="图表加载中…"></div>
                 </div>
                 <div class="chart-panel">
                   <div class="chart-title">{{ chart2Title }}</div>
-                  <div ref="monthRef" class="chart-box"></div>
+                  <div ref="monthRef" class="chart-box" v-loading="chartsLoading" element-loading-text="图表加载中…"></div>
                 </div>
               </div>
               <p class="report-foot">本报告由绿碳智衡平台自动生成 · 数据口径：能源活动类排放核算</p>
@@ -69,7 +69,10 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+
+// keep-alive 标签页缓存名（布局 include 列表按此匹配）
+defineOptions({ name: 'ReportPage' })
 import * as echarts from 'echarts'
 import { marked } from 'marked'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -132,13 +135,21 @@ async function loadReports() {
   reports.value = res.data
 }
 
+/** 附图表加载中（正文立即展示，图表转圈提示） */
+const chartsLoading = ref(false)
+
 async function loadReport(r) {
-  // 正文立即展示；图表后台渲染，完成后自动出现（无遮罩、无转圈）
+  // 正文立即展示；图表后台渲染并显示转圈，完成后自动出现
   const res = await reportDetailApi(r.id)
   currentReport.value = res.data
   currentId.value = res.data.id
   await nextTick()
-  renderCharts(res.data)
+  chartsLoading.value = true
+  try {
+    await renderCharts(res.data)
+  } finally {
+    chartsLoading.value = false
+  }
 }
 
 async function handleRegenerate() {
@@ -302,6 +313,10 @@ function handleResize() {
   trendChart?.resize()
   monthChart?.resize()
 }
+
+// keep-alive 恢复页面时按当前尺寸重绘图表：数据若在页面离屏（deactivated）期间
+// 返回并渲染，图表容器尺寸为 0，必须激活后重绘，否则切回来是空白图表
+onActivated(handleResize)
 
 onMounted(async () => {
   // 报告历史与状态接口并行加载（历史列表不依赖状态，不必排队等慢查询）

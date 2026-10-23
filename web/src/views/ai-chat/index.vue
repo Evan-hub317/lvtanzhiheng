@@ -164,6 +164,9 @@
 
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+
+// keep-alive 标签页缓存名（布局 include 列表按此匹配）
+defineOptions({ name: 'AiChatPage' })
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { sessionListApi, messageListApi, saveMessageApi, deleteSessionApi } from '@/api/chat'
 import { kbListApi, kbContentApi, kbUploadApi, kbUpdateStatusApi, kbDeleteApi } from '@/api/kb'

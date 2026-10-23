@@ -116,6 +116,9 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
+
+// keep-alive 标签页缓存名（布局 include 列表按此匹配）
+defineOptions({ name: 'AlertPage' })
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { alertScanApi, alertAnomalyApi, alertPageApi, alertHandleApi, alertSummaryApi } from '@/api/alert'
 import RegionSelect from '@/components/RegionSelect.vue'

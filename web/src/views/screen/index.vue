@@ -121,6 +121,9 @@ import { screenPeriodApi } from '@/api/analysis'
 import { regionListApi } from '@/api/dict'
 import chinaJson from '@/assets/china.json'
 
+// keep-alive 缓存匹配名（App.vue 的 include 列表）
+defineOptions({ name: 'ScreenPage' })
+
 const loading = ref(false)
 const status = ref(null)
 const periodRange = ref([])
@@ -289,7 +292,7 @@ async function loadScreenData() {
 
 // ===== 地图 =====
 function renderMap(provinces) {
-  mapChart = mapChart || echarts.init(mapRef.value)
+  mapChart = echarts.getInstanceByDom(mapRef.value) || echarts.init(mapRef.value)
   echarts.registerMap('china', chinaJson)
   const data = provinces.map(p => ({ name: p.regionName, value: Number((p.emission / 1e8).toFixed(2)) }))
   const max = data.length ? Math.max(...data.map(d => d.value)) : 0
@@ -339,7 +342,7 @@ function renderMap(provinces) {
 
 // ===== 侧栏图表 =====
 function renderRank(rows) {
-  rankChart = rankChart || echarts.init(rankRef.value)
+  rankChart = echarts.getInstanceByDom(rankRef.value) || echarts.init(rankRef.value)
   const top = [...rows].sort((a, b) => a.emission - b.emission).slice(-10)
   rankChart.setOption({
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, valueFormatter: v => (v / 1e8).toFixed(2) + ' 亿吨' },
@@ -374,7 +377,7 @@ function renderRank(rows) {
 }
 
 function renderIndustry(rows) {
-  industryChart = industryChart || echarts.init(industryRef.value)
+  industryChart = echarts.getInstanceByDom(industryRef.value) || echarts.init(industryRef.value)
   if (!rows?.length) {
     industryChart.setOption({ graphic: emptyScreenGraphic('暂无数据') }, true)
     return

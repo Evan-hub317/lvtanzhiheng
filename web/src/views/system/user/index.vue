@@ -100,6 +100,9 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
+
+// keep-alive 标签页缓存名（布局 include 列表按此匹配）
+defineOptions({ name: 'UserPage' })
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   pageUsersApi,

@@ -77,7 +77,10 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+
+// keep-alive 标签页缓存名（布局 include 列表按此匹配）
+defineOptions({ name: 'DashboardPage' })
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -199,7 +202,7 @@ function endLoad() {
 }
 
 function renderTrendChart(rows) {
-  trendChart = trendChart || echarts.init(trendRef.value)
+  trendChart = echarts.getInstanceByDom(trendRef.value) || echarts.init(trendRef.value)
   if (!rows?.length) {
     trendChart.setOption({}, true)
     trendChart.setOption({
@@ -262,7 +265,7 @@ function renderTrendChart(rows) {
 }
 
 function renderPieChart(rows, type) {
-  pieChart = pieChart || echarts.init(pieRef.value)
+  pieChart = echarts.getInstanceByDom(pieRef.value) || echarts.init(pieRef.value)
   if (!rows?.length) {
     pieChart.setOption({ graphic: null }, true)
     pieChart.setOption({
@@ -387,6 +390,10 @@ function handleResize() {
   pieChart?.resize()
 }
 
+// keep-alive 恢复页面时按当前尺寸重绘图表：数据若在页面离屏（deactivated）期间
+// 返回并渲染，图表容器尺寸为 0，必须激活后重绘，否则切回来是空白图表
+onActivated(handleResize)
+
 onMounted(() => {
   loadStats()
   loadDashboardData()
@@ -403,6 +410,7 @@ onBeforeUnmount(() => {
 <style scoped>
 /* 占满视口可用高度：100vh - 顶栏 60px - 内容区上下内边距 32px；页面自身不滚动 */
 .dashboard {
+  /* 占满视口可用高度：100vh - 顶栏 60 - 内容区边距 32 */
   height: calc(100vh - 92px);
   min-height: 560px;
   overflow: hidden;
