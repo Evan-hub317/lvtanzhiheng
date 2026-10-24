@@ -17,11 +17,9 @@ export const useUserStore = defineStore('user', {
       const res = await loginApi(form)
       this.token = res.data.token
       localStorage.setItem('satoken', this.token)
-      this.userInfo = {
-        username: res.data.username,
-        realName: res.data.realName,
-        roleCode: res.data.roleCode
-      }
+      // 保存后端返回的完整用户信息（含邮箱/手机号/头像/注册时间），
+      // 避免登录后个人中心缺字段、需刷新才补齐
+      this.userInfo = res.data
       return res
     },
     async fetchUserInfo() {

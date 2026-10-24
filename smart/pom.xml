@@ -185,6 +185,9 @@
 							<artifactId>lombok</artifactId>
 						</exclude>
 					</excludes>
+					<!-- spring-boot:run fork 出的应用进程工作目录默认是 pom 所在目录（smart/），
+					     上传目录 uploads 会落到 smart/uploads；显式指向项目根，与知识库 kb 同级 -->
+					<workingDirectory>${project.basedir}/..</workingDirectory>
 				</configuration>
 			</plugin>
 		</plugins>

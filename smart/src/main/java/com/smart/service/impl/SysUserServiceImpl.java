@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.smart.common.BizException;
 import com.smart.dto.LoginDTO;
 import com.smart.dto.PasswordDTO;
+import com.smart.dto.ProfileDTO;
 import com.smart.dto.UserDTO;
 import com.smart.entity.SysRole;
 import com.smart.entity.SysUser;
@@ -17,11 +18,17 @@ import com.smart.service.SysUserService;
 import com.smart.vo.LoginVO;
 import com.smart.vo.UserPageVO;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -35,6 +42,13 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     private static final long PROTECTED_USER_ID = 1L;
 
     private final SysRoleMapper roleMapper;
+
+    /** 上传文件根目录（与 KB 一致），头像存其下 images 子目录 */
+    @Value("${app.upload-dir:uploads}")
+    private String uploadDir;
+
+    /** 头像允许的扩展名 */
+    private static final Set<String> AVATAR_EXTS = Set.of("png", "jpg", "jpeg", "webp");
 
     @Override
     public LoginVO login(LoginDTO dto) {
@@ -158,16 +172,56 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     }
 
     @Override
-    public void updateProfile(String realName) {
-        if (!StringUtils.hasText(realName)) {
-            throw new BizException("姓名不能为空");
+    public void updateProfile(ProfileDTO dto) {
+        SysUser user = getById(StpUtil.getLoginIdAsLong());
+        if (user == null) {
+            throw new BizException(401, "用户不存在");
+        }
+        user.setRealName(dto.getRealName().trim());
+        user.setEmail(StringUtils.hasText(dto.getEmail()) ? dto.getEmail().trim() : null);
+        user.setPhone(StringUtils.hasText(dto.getPhone()) ? dto.getPhone().trim() : null);
+        updateById(user);
+    }
+
+    @Override
+    public String uploadAvatar(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BizException("未收到图片");
+        }
+        String original = file.getOriginalFilename() == null ? "" : file.getOriginalFilename();
+        String ext = original.contains(".")
+                ? original.substring(original.lastIndexOf('.') + 1).toLowerCase()
+                : "png";
+        if (!AVATAR_EXTS.contains(ext)) {
+            throw new BizException("仅支持 png/jpg/jpeg/webp 图片");
         }
         SysUser user = getById(StpUtil.getLoginIdAsLong());
         if (user == null) {
             throw new BizException(401, "用户不存在");
         }
-        user.setRealName(realName.trim());
-        updateById(user);
+        try {
+            Path dir = Paths.get(uploadDir, "images");
+            Files.createDirectories(dir);
+            String filename = "avatar_" + user.getId() + "_" + System.currentTimeMillis() + "." + ext;
+            file.transferTo(dir.resolve(filename));
+            // 删除旧头像文件（避免每次上传堆积）
+            String old = user.getAvatar();
+            if (StringUtils.hasText(old)) {
+                try {
+                    Files.deleteIfExists(Paths.get(uploadDir).resolve(old.replaceFirst("^/uploads/", "")));
+                } catch (Exception ignored) {
+                    // 旧文件删除失败不阻塞上传
+                }
+            }
+            String avatarPath = "/uploads/images/" + filename;
+            user.setAvatar(avatarPath);
+            updateById(user);
+            return avatarPath;
+        } catch (BizException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BizException("头像保存失败");
+        }
     }
 
     private LoginVO buildVO(SysUser user, String token) {
@@ -177,6 +231,10 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         vo.setRealName(user.getRealName());
         SysRole role = roleMapper.selectById(user.getRoleId());
         vo.setRoleCode(role == null ? "" : role.getRoleCode());
+        vo.setCreateTime(user.getCreateTime());
+        vo.setEmail(user.getEmail());
+        vo.setPhone(user.getPhone());
+        vo.setAvatar(user.getAvatar());
         return vo;
     }
 }

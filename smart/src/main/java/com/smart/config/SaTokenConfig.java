@@ -28,7 +28,8 @@ public class SaTokenConfig implements WebMvcConfigurer {
                     SaRouter.match("/**")
                             .notMatch("/auth/login",
                                     "/doc.html", "/webjars/**", "/v3/api-docs/**", "/swagger-ui/**",
-                                    "/favicon.ico", "/error")
+                                    "/favicon.ico", "/error",
+                                    "/uploads/**")
                             .check(r -> StpUtil.checkLogin());
                 })
                 .isAnnotation(true))

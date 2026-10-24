@@ -12,5 +12,6 @@ export const resetPasswordApi = id => request.put(`/user/${id}/reset-password`)
 
 export const changePasswordApi = data => request.put('/user/password', data)
 
-export const updateProfileApi = realName =>
-  request.put('/user/profile', null, { params: { realName } })
+export const updateProfileApi = data => request.put('/user/profile', data)
+
+export const uploadAvatarApi = formData => request.post('/user/avatar', formData)

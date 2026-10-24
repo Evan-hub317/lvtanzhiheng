@@ -76,7 +76,9 @@ algo:
 
 # 应用配置
 app:
-  # 知识库文档存储目录
+  # 上传文件存储目录（知识库 kb、头像 images 均在其下），按「进程工作目录」相对解析。
+  # 请务必从项目根目录启动后端（mvn -f smart/pom.xml spring-boot:run），
+  # 使 uploads 落在项目根、与 kb 同级；部署时 jar 同级放 uploads/ 即可
   upload-dir: uploads
 
 # Knife4j 接口文档（启动后访问 http://localhost:8080/doc.html）

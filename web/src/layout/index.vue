@@ -38,7 +38,7 @@
               v-for="tab in tabs"
               :key="tab.path"
               class="tab-item"
-              :class="{ active: route.path === tab.path }"
+              :class="{ active: route.path === tab.path, 'no-close': tabs.length <= 1 }"
               :style="{ flexShrink: tab.title.length > 4 ? 2 : 1 }"
               @click="router.push(tab.path)"
             >
@@ -50,7 +50,11 @@
 
         <el-dropdown @command="handleCommand">
           <span class="header-user">
-            <el-avatar :size="32" class="user-avatar">{{ avatarText }}</el-avatar>
+            <!-- 已上传头像时显示图片，否则回退为姓名首字 -->
+            <el-avatar :size="32" class="user-avatar">
+              <img v-if="avatarUrl" :src="avatarUrl" alt="avatar" />
+              <template v-else>{{ avatarText }}</template>
+            </el-avatar>
             <span class="user-name">{{ displayName }}</span>
             <el-icon class="user-arrow"><ArrowDown /></el-icon>
           </span>
@@ -164,6 +168,12 @@ const displayName = computed(
   () => userStore.userInfo?.realName || userStore.userInfo?.username || '用户'
 )
 const avatarText = computed(() => displayName.value.charAt(0).toUpperCase())
+// 头像地址：后端返回相对路径（/uploads/images/xxx），拼接后端地址；未上传为空
+const API_BASE = window.APP_CONFIG?.API_BASE || '/api'
+const avatarUrl = computed(() => {
+  const a = userStore.userInfo?.avatar
+  return a ? API_BASE + a : ''
+})
 
 async function handleCommand(cmd) {
   if (cmd === 'profile') {
@@ -265,7 +275,7 @@ async function handleCommand(cmd) {
 }
 .header-left :deep(.el-breadcrumb) {
   flex-shrink: 0;
-  width: 140px; /* 固定宽度：面包屑文字长短变化不带动标签栏位移 */
+  width: 130px; /* 固定宽度：面包屑文字长短变化不带动标签栏位移 */
   overflow: hidden;
   white-space: nowrap;
 }
@@ -296,9 +306,18 @@ async function handleCommand(cmd) {
   color: #fff;
   font-weight: 600;
 }
+.user-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 .user-name {
   font-size: 14px;
   color: #1f2d3d;
+  max-width: 6em; /* 超过六个字省略 */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .user-arrow {
   color: #98a4b3;
@@ -319,7 +338,9 @@ async function handleCommand(cmd) {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-left: 14px;
+  
+  padding-left: 14px;
+  border-left: 1px solid #e3ebf3; /* 与面包屑之间的竖线分隔 */
   margin-right: 16px; /* 与右侧用户区保持间隔，标签再多也不贴头像 */
   flex: 1;
   min-width: 0;
@@ -330,7 +351,7 @@ async function handleCommand(cmd) {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
+  padding: 4px 8px 4px 12px; /* 文字与左边框留出更大间距 */
   border-radius: 12px;
   border: 1px solid #e3ebf3;
   background: #f0f4f8;
@@ -341,6 +362,9 @@ async function handleCommand(cmd) {
   flex-shrink: 1; /* 允许收缩：配合行内 flexShrink，较长的标题承担更多省略 */
   min-width: 70px; /* 收缩下限：保证关闭按钮和约 2-3 个字可见 */
   max-width: 160px; /* 正常宽度上限（防超长标题） */
+}
+.tab-item.no-close {
+  padding-right: 12px; /* 仅剩一个标签（无关闭按钮）时，右侧内边距与左侧一致 */
 }
 .tab-close {
   flex-shrink: 0; /* 关闭按钮不参与收缩 */

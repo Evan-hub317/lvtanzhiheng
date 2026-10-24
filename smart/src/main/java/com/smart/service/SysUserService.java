@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.smart.dto.LoginDTO;
 import com.smart.dto.PasswordDTO;
+import com.smart.dto.ProfileDTO;
 import com.smart.dto.UserDTO;
 import com.smart.entity.SysUser;
 import com.smart.vo.LoginVO;
@@ -52,7 +53,12 @@ public interface SysUserService extends IService<SysUser> {
     void changePassword(PasswordDTO dto);
 
     /**
-     * 修改本人姓名
+     * 修改本人资料（姓名/邮箱/手机号）
      */
-    void updateProfile(String realName);
+    void updateProfile(ProfileDTO dto);
+
+    /**
+     * 上传本人头像：保存到 uploads/images 并更新库，返回头像相对路径
+     */
+    String uploadAvatar(org.springframework.web.multipart.MultipartFile file);
 }

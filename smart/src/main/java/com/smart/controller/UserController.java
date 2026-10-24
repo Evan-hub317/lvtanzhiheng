@@ -4,6 +4,7 @@ import cn.dev33.satoken.annotation.SaCheckRole;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.smart.common.Result;
 import com.smart.dto.PasswordDTO;
+import com.smart.dto.ProfileDTO;
 import com.smart.dto.UserDTO;
 import com.smart.service.SysUserService;
 import com.smart.vo.UserPageVO;
@@ -20,6 +21,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.Map;
 
 /**
  * 用户管理接口（管理操作仅管理员可用）
@@ -80,10 +84,16 @@ public class UserController {
         return Result.ok();
     }
 
-    @Operation(summary = "修改本人姓名")
+    @Operation(summary = "修改本人资料（姓名/邮箱/手机号）")
     @PutMapping("/profile")
-    public Result<Void> updateProfile(@RequestParam String realName) {
-        sysUserService.updateProfile(realName);
+    public Result<Void> updateProfile(@RequestBody @Valid ProfileDTO dto) {
+        sysUserService.updateProfile(dto);
         return Result.ok();
+    }
+
+    @Operation(summary = "上传本人头像（裁剪后图片，存 uploads/images）")
+    @PostMapping("/avatar")
+    public Result<Map<String, String>> uploadAvatar(@RequestParam("file") MultipartFile file) {
+        return Result.ok(Map.of("avatar", sysUserService.uploadAvatar(file)));
     }
 }

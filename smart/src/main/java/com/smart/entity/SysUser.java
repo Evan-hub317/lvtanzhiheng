@@ -22,6 +22,15 @@ public class SysUser {
 
     private String realName;
 
+    /** 邮箱（个人中心展示） */
+    private String email;
+
+    /** 手机号（个人中心展示） */
+    private String phone;
+
+    /** 头像相对路径（如 /uploads/images/xxx.png，存 images 目录） */
+    private String avatar;
+
     private Integer roleId;
 
     /** 1启用 0停用 */

@@ -23,7 +23,11 @@ cd smart
 mvn compile              # 编译（本机 Maven 3.9.9 + JDK 23，pom 已显式配 Lombok 注解处理器，勿删）
 mvn package -DskipTests  # 打包 → target/smart-0.0.1-SNAPSHOT.jar（测试仅有 1 个上下文加载用例，可跳过）
 mvn test -Dtest=SmartApplicationTests   # 跑测试
-./mvnw.cmd spring-boot:run              # 启动（接口文档 http://localhost:8080/doc.html）
+
+# 启动：必须回到项目根目录再执行（upload-dir: uploads 按进程工作目录解析，
+# 在项目根启动时上传文件才落在项目根 uploads/，与知识库 kb 同级）
+cd ..
+mvn -f smart/pom.xml spring-boot:run    # 接口文档 http://localhost:8080/doc.html
 ```
 
 - **本地 Maven 仓库在 `d:/maven/localRepository`**（`~/.m2/settings.xml` 指定，阿里云镜像），不是默认 `~/.m2/repository`。怀疑依赖问题时先查该目录下 jar 是否完整。
@@ -99,7 +103,7 @@ curl -X POST http://localhost:8080/calc/execute  -H "satoken: <token>" -H "Conte
 - **配置与密钥不入库**：`application-secret.yml`、`algo/.env`、`web/public/config.js` 均为部署环境文件；知识库原文件存 `uploads/kb/`（`app.upload-dir` 配置）。
 - **SQL 文件两份**：仓库内 `docs/sql/smart_carbon_struct.sql` 仅表结构；含基础字典/因子/账号/行政区划的完整版在网盘（见运行指南）。注意网盘版暂缺 stat_* 表与 2016+ 数据，部署前需从库重新导出。
 - **依赖版本锁定勿动**：SB 3.5.4（SB4 生态不兼容 MP/Sa-Token/Knife4j）、MP 3.5.9 + 单独引 `mybatis-plus-jsqlparser`（分页插件）、Sa-Token 1.39、Knife4j 4.5 + springdoc 2.8.9 显式覆盖；easyexcel 已注释禁用（poi 与知识库解析的 poi-ooxml 5.2.5 冲突）。
-- **部署（宝塔）**：jar 同级放 `uploads/kb/`、可选 `prompts/`；Nginx history 路由 `try_files` + `.mjs` 补 MIME + SSE 反代需 `proxy_buffering off`。详见运行指南。
+- **部署（宝塔）**：jar 同级放 `uploads/`（含 kb、images 子目录）、可选 `prompts/`，启动加 `--app.upload-dir=uploads`（开发默认 `../uploads` 指向项目根，见 application.yml）；Nginx history 路由 `try_files` + `.mjs` 补 MIME + SSE 反代需 `proxy_buffering off`。详见运行指南。
 - 文档更新需同步：改功能/口径后记得更新 README 与运行指南（比赛交付物，答辩演示故事线在 README 附录）。
 # Summary Instructions
 When summarizing this conversation, always preserve:
