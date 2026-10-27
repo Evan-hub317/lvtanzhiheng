@@ -321,7 +321,7 @@ function handleResetPwd() {
 
 /* ===== 左栏：用户概要 + 选项菜单 ===== */
 .profile-aside {
-  flex: 0 0 240px;
+  flex: 0 0 280px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -338,15 +338,16 @@ function handleResetPwd() {
   border-bottom: 1px solid #eef2f7;
 }
 .aside-avatar {
-  width: 70px;
-  height: 70px;
+  margin-left: 10px;
+  width: 92px;
+  height: 92px;
   flex-shrink: 0;
   border-radius: 50%;
   overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
+  font-size: 34px;
   font-weight: 700;
   color: #fff;
   background: linear-gradient(135deg, #0ea5e9, #10b981);
@@ -359,12 +360,15 @@ function handleResetPwd() {
 .aside-info {
   flex: 1; /* 占满头像右侧剩余宽度，文字在其内居中 */
   min-width: 0;
+  height: 108px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 .aside-name {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
   color: #1f2d3d;
   max-width: 6em; /* 超过六个字省略 */
@@ -376,8 +380,8 @@ function handleResetPwd() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 3px;
-  margin-top: 5px;
+  gap: 14px;
+  margin-top: 8px;
 }
 .aside-time {
   font-size: 11px;

@@ -117,26 +117,26 @@
         <div class="tech-panel compare-panel">
           <div class="tech-panel-title">情景对比</div>
           <el-table :data="compareRows" size="small" stripe :max-height="170">
-            <el-table-column prop="name" label="情景" min-width="130" />
-            <el-table-column label="煤炭占比" width="100" align="right">
+            <el-table-column align="center" prop="name" label="情景" min-width="130" />
+            <el-table-column align="center" label="煤炭占比" width="100" >
               <template #default="{ row }">{{ row.coalRatio }}%</template>
             </el-table-column>
-            <el-table-column label="工业占比" width="100" align="right">
+            <el-table-column align="center" label="工业占比" width="100" >
               <template #default="{ row }">{{ row.industryRatio }}%</template>
             </el-table-column>
-            <el-table-column label="能效下降率" width="110" align="right">
+            <el-table-column align="center" label="能效下降率" width="110" >
               <template #default="{ row }">{{ row.techEfficiency }}%</template>
             </el-table-column>
-            <el-table-column label="达峰年份" width="100">
+            <el-table-column align="center" label="达峰年份" width="100">
               <template #default="{ row }">
                 <el-tag v-if="row.peakYear" size="small" type="success" effect="light">{{ row.peakYear }}</el-tag>
                 <span v-else class="no-peak">未达峰</span>
               </template>
             </el-table-column>
-            <el-table-column label="峰值（亿吨）" width="120" align="right">
+            <el-table-column align="center" label="峰值（亿吨）" width="120" >
               <template #default="{ row }">{{ row.peakValue ? (row.peakValue / 1e8).toFixed(2) : '-' }}</template>
             </el-table-column>
-            <el-table-column label="末期排放（亿吨）" width="140" align="right">
+            <el-table-column align="center" label="末期排放（亿吨）" width="140" >
               <template #default="{ row }">{{ (row.endValue / 1e8).toFixed(2) }}</template>
             </el-table-column>
           </el-table>
@@ -545,7 +545,7 @@ async function init() {
     regions.value = regionRes.data.filter(r => r.level <= 2)
     const { minYear, maxYear } = statusRes.data
     if (!minYear || !maxYear) {
-      ElMessage.warning('暂无数据，请先在工作台生成模拟数据并执行核算')
+      ElMessage.warning('暂无数据')
       return
     }
     await loadPredict()

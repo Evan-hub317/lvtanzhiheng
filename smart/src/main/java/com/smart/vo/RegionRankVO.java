@@ -16,4 +16,10 @@ public class RegionRankVO {
 
     /** 年度排放量（tCO2） */
     private BigDecimal emission;
+
+    /** 人均碳排放（tCO2/人，总量/常住人口；人口缺失为 null） */
+    private BigDecimal perCapita;
+
+    /** 是否直辖市（1=是，前端标注用） */
+    private Integer isMunicipality;
 }

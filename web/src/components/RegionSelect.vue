@@ -16,7 +16,7 @@
       :style="{ width: width + 'px' }"
       @update:model-value="onCityChange"
     >
-      <el-option label="全省" :value="provinceId" />
+      <el-option v-if="!isMunicipalityProvince" label="全省" :value="provinceId" />
       <el-option v-for="c in cities" :key="c.id" :label="c.regionName" :value="c.id" />
     </el-select>
   </div>
@@ -47,9 +47,18 @@ const provinceId = computed(() => {
   return current.level === 1 ? current.id : current.parentId
 })
 
-const cities = computed(() =>
-  allRegions.value.filter(r => r.level === 2 && r.parentId === provinceId.value)
-)
+const cities = computed(() => {
+  const province = allRegions.value.find(r => r.id === provinceId.value)
+  // 直辖市：其下区县已删除，直辖市自身既是省也是市，作为唯一的“市”选项
+  if (province?.isMunicipality) return [province]
+  return allRegions.value.filter(r => r.level === 2 && r.parentId === provinceId.value)
+})
+
+// 选中省份为直辖市时隐藏「全省」选项（与直辖市自身选项重复）
+const isMunicipalityProvince = computed(() => {
+  const p = allRegions.value.find(r => r.id === provinceId.value)
+  return !!p?.isMunicipality
+})
 
 const showCitySelect = computed(() => provinceId.value && provinceId.value !== 1)
 

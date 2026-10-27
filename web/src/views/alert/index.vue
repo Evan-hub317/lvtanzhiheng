@@ -50,29 +50,29 @@
       </div>
 
       <el-table :data="rows" v-loading="loading" stripe>
-        <el-table-column label="检测方式" width="120">
+        <el-table-column align="center" label="检测方式" width="120">
           <template #default="{ row }">
             <el-tag :type="row.detectType === 2 ? 'primary' : 'warning'" effect="light" round>
               {{ row.detectType === 2 ? '🤖 AI 检测' : '📏 阈值规则' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="ruleName" label="规则 / 能源品种" min-width="170" />
-        <el-table-column prop="regionName" label="区域" width="110" />
-        <el-table-column prop="industryName" label="行业" width="100">
+        <el-table-column align="center" prop="ruleName" label="规则 / 能源品种" min-width="170" />
+        <el-table-column align="center" prop="regionName" label="区域" width="110" />
+        <el-table-column align="center" prop="industryName" label="行业" width="100">
           <template #default="{ row }">{{ row.industryName || '全省' }}</template>
         </el-table-column>
-        <el-table-column label="时间" width="100">
+        <el-table-column align="center" label="时间" width="100">
           <template #default="{ row }">{{ row.year }}{{ row.month ? '-' + row.month : '' }}</template>
         </el-table-column>
-        <el-table-column label="实际值" min-width="130" align="right">
+        <el-table-column align="center" label="实际值" min-width="130">
           <template #default="{ row }">
             <span v-if="row.detectType === 1 && row.ruleName.includes('环比')">{{ row.actualValue }}%</span>
             <span v-else-if="row.detectType === 1">{{ (row.actualValue / 1e8).toFixed(2) }} 亿吨</span>
             <span v-else>{{ (row.actualValue / 10000).toFixed(1) }} 万吨</span>
           </template>
         </el-table-column>
-        <el-table-column label="异常分数" width="150">
+        <el-table-column align="left" label="异常分数" width="150">
           <template #default="{ row }">
             <el-progress
               v-if="row.anomalyScore !== null && row.anomalyScore !== undefined"
@@ -83,15 +83,15 @@
             <span v-else class="no-score">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
+        <el-table-column align="center" label="状态" width="90">
           <template #default="{ row }">
             <el-tag :type="row.status === 1 ? 'success' : 'danger'" effect="light" round>
               {{ row.status === 1 ? '已确认' : '待确认' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="createTime" label="触发时间" width="160" />
-        <el-table-column label="操作" width="90" fixed="right">
+        <el-table-column align="center" prop="createTime" label="触发时间" width="160" />
+        <el-table-column align="center" label="操作" width="90" fixed="right">
           <template #default="{ row }">
             <el-button v-if="row.status === 0" link type="primary" size="small" @click="handleConfirm(row)">确认</el-button>
             <span v-else class="handled-by">{{ row.handler || '' }}</span>

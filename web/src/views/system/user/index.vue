@@ -23,25 +23,25 @@
 
     <!-- 用户表格 -->
     <el-table :data="tableData" v-loading="loading" stripe>
-      <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column prop="username" label="用户名" min-width="120" />
-      <el-table-column prop="realName" label="姓名" min-width="100" />
-      <el-table-column prop="roleName" label="角色" width="120">
+      <el-table-column align="center" prop="id" label="ID" width="70" />
+      <el-table-column align="center" prop="username" label="用户名" min-width="120" />
+      <el-table-column align="center" prop="realName" label="姓名" min-width="100" />
+      <el-table-column align="center" prop="roleName" label="角色" width="120">
         <template #default="{ row }">
           <el-tag :type="row.roleName === '系统管理员' ? 'warning' : 'primary'" effect="light" round>
             {{ row.roleName }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="status" label="状态" width="90">
+      <el-table-column align="center" prop="status" label="状态" width="90">
         <template #default="{ row }">
           <el-tag :type="row.status === 1 ? 'success' : 'info'" effect="light" round>
             {{ row.status === 1 ? '启用' : '停用' }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="createTime" label="创建时间" width="170" />
-      <el-table-column label="操作" width="270" fixed="right">
+      <el-table-column align="center" prop="createTime" label="创建时间" width="170" />
+      <el-table-column align="center" label="操作" width="270" fixed="right">
         <template #default="{ row }">
           <el-button link type="primary" size="small" @click="openDialog(row)">编辑</el-button>
           <el-button link type="warning" size="small" @click="handleResetPassword(row)">重置密码</el-button>

@@ -25,8 +25,14 @@ public class DimRegion {
     /** 1省 2市 */
     private Integer level;
 
+    /** 是否直辖市：1=既是省也是市（其下无区县，自身参与省/市两级口径） */
+    private Integer isMunicipality;
+
     /** GDP（亿元），用于碳强度计算 */
     private BigDecimal gdp;
+
+    /** 常住人口（万人），人均碳排放口径 */
+    private BigDecimal population;
 
     private Integer sortOrder;
 }

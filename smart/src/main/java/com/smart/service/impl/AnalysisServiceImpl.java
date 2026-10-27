@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.smart.common.BizException;
+import com.smart.dto.DetailQueryDTO;
 import com.smart.entity.DimRegion;
 import com.smart.mapper.DimRegionMapper;
 import com.smart.mapper.FactEmissionMonthMapper;
@@ -47,17 +48,18 @@ public class AnalysisServiceImpl implements AnalysisService {
     }
 
     @Override
-    public List<TrendVO> trend(int regionId, int startYear, int endYear, Integer energyId) {
+    public List<TrendVO> trend(int regionId, int startYear, int endYear, Integer industryId, Integer energyId) {
         int scope = scopeRegionId(regionId);
-        if (scope >= 0 && energyId == null) {
+        // 行业筛选需要明细聚合（汇总表无行业维度）
+        if (scope >= 0 && energyId == null && industryId == null) {
             List<TrendVO> rows = summaryMapper.selectTrend(scope, startYear, endYear);
             if (!rows.isEmpty()) {
                 return rows;
             }
         }
         return regionId == PROVINCE_REGION_ID
-                ? yearMapper.selectTrendAll(startYear, endYear, energyId)
-                : yearMapper.selectTrendByRegion(regionId, startYear, endYear, energyId);
+                ? yearMapper.selectTrendAll(startYear, endYear, industryId, energyId)
+                : yearMapper.selectTrendByRegion(regionId, startYear, endYear, industryId, energyId);
     }
 
     @Override
@@ -117,7 +119,11 @@ public class AnalysisServiceImpl implements AnalysisService {
     }
 
     @Override
-    public List<RegionRankVO> cityRankingByProvince(int provinceId, int year) {
+    public List<RegionRankVO> cityRankingByProvince(int provinceId, int year, Integer industryId, Integer energyId) {
+        // 行业/能源筛选需要明细聚合（汇总表无该维度），其余走汇总表
+        if (industryId != null || energyId != null) {
+            return yearMapper.selectCityRankingByProvinceFiltered(provinceId, year, industryId, energyId);
+        }
         List<RegionRankVO> rows = summaryMapper.selectCityRankingByProvince(provinceId, year);
         return rows.isEmpty() ? yearMapper.selectCityRankingByProvince(provinceId, year) : rows;
     }
@@ -130,7 +136,10 @@ public class AnalysisServiceImpl implements AnalysisService {
     }
 
     @Override
-    public List<RegionRankVO> regionRanking(int year) {
+    public List<RegionRankVO> regionRanking(int year, Integer industryId, Integer energyId) {
+        if (industryId != null || energyId != null) {
+            return yearMapper.selectRegionRankingFiltered(year, industryId, energyId);
+        }
         List<RegionRankVO> rows = summaryMapper.selectCityRanking(year);
         return rows.isEmpty() ? yearMapper.selectRegionRanking(year) : rows;
     }
@@ -144,29 +153,61 @@ public class AnalysisServiceImpl implements AnalysisService {
     }
 
     @Override
-    public List<RegionRankVO> provinceEmissions(int year) {
+    public List<RegionRankVO> provinceEmissions(int year, Integer industryId, Integer energyId) {
+        if (industryId != null || energyId != null) {
+            return yearMapper.selectProvinceRankingFiltered(year, industryId, energyId);
+        }
         List<RegionRankVO> rows = summaryMapper.selectProvinceRanking(year);
         return rows.isEmpty() ? yearMapper.selectProvinceRanking(year) : rows;
     }
 
     @Override
-    public IPage<DetailVO> detailPage(int pageNum, int pageSize, int regionId,
-                                      Integer year, Integer industryId, Integer energyId) {
-        Page<DetailVO> page = new Page<>(pageNum, pageSize);
-        return regionId == PROVINCE_REGION_ID
-                ? yearMapper.selectDetailAll(page, year, industryId, energyId)
-                : yearMapper.selectDetailByRegion(page, regionId, year, industryId, energyId);
+    public List<RegionRankVO> monthRanking(int year, int month, Integer provinceId, String scope,
+                                           Integer industryId, Integer energyId) {
+        if ("city".equalsIgnoreCase(scope)) {
+            Integer pid = (provinceId == null || provinceId == PROVINCE_REGION_ID) ? null : provinceId;
+            return monthMapper.selectMonthRankingCity(year, month, pid, industryId, energyId);
+        }
+        return monthMapper.selectMonthRankingProvince(year, month, industryId, energyId);
+    }
+
+    @Override
+    public IPage<DetailVO> detailPage(DetailQueryDTO q) {
+        // 排序白名单映射（防注入：sortField 只允许四种取值，方向只允许 ASC/DESC）
+        String field = q.getSortField() == null ? "time" : q.getSortField();
+        String dir = "asc".equalsIgnoreCase(q.getSortOrder()) ? "ASC" : "DESC";
+        boolean byMonth = "month".equalsIgnoreCase(q.getGranularity());
+        String timeCols = byMonth ? "year, month" : "year";
+        String col = switch (field) {
+            case "emission" -> "emission";
+            case "perCapita" -> "perCapita";
+            case "yoyRate" -> "yoyRate";
+            default -> null;
+        };
+        String sortSql = col == null
+                ? timeCols + " " + dir
+                : col + " " + dir + ", " + timeCols + " " + dir;
+
+        Page<DetailVO> page = new Page<>(q.getPageNum(), q.getPageSize());
+        if (byMonth) {
+            return q.getRegionId() == PROVINCE_REGION_ID
+                    ? monthMapper.selectDetailAllMonth(page, q, sortSql)
+                    : monthMapper.selectDetailByRegionMonth(page, q, sortSql);
+        }
+        return q.getRegionId() == PROVINCE_REGION_ID
+                ? yearMapper.selectDetailAll(page, q, sortSql)
+                : yearMapper.selectDetailByRegion(page, q, sortSql);
     }
 
     @Override
     public KpiVO kpi(int regionId, int year) {
-        List<TrendVO> rows = trend(regionId, year, year, null);
+        List<TrendVO> rows = trend(regionId, year, year, null, null);
         if (rows.isEmpty()) {
             return null;
         }
         BigDecimal total = rows.get(0).getEmission();
         // 同比：与上一年对比
-        List<TrendVO> prevRows = trend(regionId, year - 1, year - 1, null);
+        List<TrendVO> prevRows = trend(regionId, year - 1, year - 1, null, null);
         BigDecimal yoy = null;
         if (!prevRows.isEmpty() && prevRows.get(0).getEmission().signum() > 0) {
             yoy = total.subtract(prevRows.get(0).getEmission())
@@ -215,8 +256,13 @@ public class AnalysisServiceImpl implements AnalysisService {
         if (regionId != PROVINCE_REGION_ID && region == null) {
             throw new BizException("区域不存在");
         }
-        Integer statScope = regionId == PROVINCE_REGION_ID ? 1
-                : (region.getLevel() == 1 ? regionId : null);
+        Integer statScope;
+        if (regionId == PROVINCE_REGION_ID) {
+            statScope = 1;
+        } else {
+            Integer lv = region.getLevel();
+            statScope = (lv != null && lv == 1) ? regionId : null;
+        }
         Integer factRegion = regionId == PROVINCE_REGION_ID ? null : regionId;
 
         ScreenPeriodVO vo = new ScreenPeriodVO();
@@ -234,7 +280,10 @@ public class AnalysisServiceImpl implements AnalysisService {
                     .stream().map(DimRegion::getGdp).filter(java.util.Objects::nonNull)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
         } else {
-            int provinceId = region.getLevel() == 2 ? region.getParentId() : regionId;
+            int provinceId = regionId;
+            if (region.getLevel() != null && region.getLevel() == 2 && region.getParentId() != null) {
+                provinceId = region.getParentId();
+            }
             DimRegion province = regionMapper.selectById(provinceId);
             if (province != null) {
                 gdpYi = province.getGdp();

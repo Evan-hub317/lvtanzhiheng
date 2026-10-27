@@ -57,6 +57,7 @@ public class DataController {
         if (vo == null) {
             vo = new DataStatusVO();
         }
+        // 城市口径 = 地级行政区（level=2），直辖市不纳入（只按省级口径）
         vo.setCityCount(regionMapper.selectCount(
                 new LambdaQueryWrapper<DimRegion>().eq(DimRegion::getLevel, 2)));
         vo.setCountyCount(regionMapper.selectCount(

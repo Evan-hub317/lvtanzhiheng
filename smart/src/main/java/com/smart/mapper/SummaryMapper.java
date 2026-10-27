@@ -30,9 +30,9 @@ public interface SummaryMapper {
     int insertYearTotalNational();
 
     @Insert("INSERT INTO stat_year_total (region_id, year, emission) " +
-            "SELECT r.parent_id, y.year, ROUND(SUM(y.emission), 2) " +
+            "SELECT IF(r.parent_id = 0, r.id, r.parent_id), y.year, ROUND(SUM(y.emission), 2) " +
             "FROM fact_emission_year y JOIN dim_region r ON r.id = y.region_id " +
-            "WHERE y.energy_id <= 6 GROUP BY r.parent_id, y.year")
+            "WHERE y.energy_id <= 6 GROUP BY IF(r.parent_id = 0, r.id, r.parent_id), y.year")
     int insertYearTotalProvinces();
 
     @Delete("DELETE FROM stat_year_industry")
@@ -43,9 +43,9 @@ public interface SummaryMapper {
     int insertYearIndustryNational();
 
     @Insert("INSERT INTO stat_year_industry (region_id, industry_id, year, emission) " +
-            "SELECT r.parent_id, y.industry_id, y.year, ROUND(SUM(y.emission), 2) " +
+            "SELECT IF(r.parent_id = 0, r.id, r.parent_id), y.industry_id, y.year, ROUND(SUM(y.emission), 2) " +
             "FROM fact_emission_year y JOIN dim_region r ON r.id = y.region_id " +
-            "WHERE y.energy_id <= 6 GROUP BY r.parent_id, y.industry_id, y.year")
+            "WHERE y.energy_id <= 6 GROUP BY IF(r.parent_id = 0, r.id, r.parent_id), y.industry_id, y.year")
     int insertYearIndustryProvinces();
 
     @Delete("DELETE FROM stat_year_energy")
@@ -56,9 +56,9 @@ public interface SummaryMapper {
     int insertYearEnergyNational();
 
     @Insert("INSERT INTO stat_year_energy (region_id, energy_id, year, emission) " +
-            "SELECT r.parent_id, y.energy_id, y.year, ROUND(SUM(y.emission), 2) " +
+            "SELECT IF(r.parent_id = 0, r.id, r.parent_id), y.energy_id, y.year, ROUND(SUM(y.emission), 2) " +
             "FROM fact_emission_year y JOIN dim_region r ON r.id = y.region_id " +
-            "GROUP BY r.parent_id, y.energy_id, y.year")
+            "GROUP BY IF(r.parent_id = 0, r.id, r.parent_id), y.energy_id, y.year")
     int insertYearEnergyProvinces();
 
     @Delete("DELETE FROM stat_month_total")
@@ -69,9 +69,9 @@ public interface SummaryMapper {
     int insertMonthTotalNational();
 
     @Insert("INSERT INTO stat_month_total (region_id, year, month, emission) " +
-            "SELECT r.parent_id, m.year, m.month, ROUND(SUM(m.emission), 2) " +
+            "SELECT IF(r.parent_id = 0, r.id, r.parent_id), m.year, m.month, ROUND(SUM(m.emission), 2) " +
             "FROM fact_emission_month m JOIN dim_region r ON r.id = m.region_id " +
-            "WHERE m.energy_id <= 6 GROUP BY r.parent_id, m.year, m.month")
+            "WHERE m.energy_id <= 6 GROUP BY IF(r.parent_id = 0, r.id, r.parent_id), m.year, m.month")
     int insertMonthTotalProvinces();
 
     @Delete("DELETE FROM stat_month_industry")
@@ -82,9 +82,9 @@ public interface SummaryMapper {
     int insertMonthIndustryNational();
 
     @Insert("INSERT INTO stat_month_industry (region_id, industry_id, year, month, emission) " +
-            "SELECT r.parent_id, m.industry_id, m.year, m.month, ROUND(SUM(m.emission), 2) " +
+            "SELECT IF(r.parent_id = 0, r.id, r.parent_id), m.industry_id, m.year, m.month, ROUND(SUM(m.emission), 2) " +
             "FROM fact_emission_month m JOIN dim_region r ON r.id = m.region_id " +
-            "WHERE m.energy_id <= 6 GROUP BY r.parent_id, m.industry_id, m.year, m.month")
+            "WHERE m.energy_id <= 6 GROUP BY IF(r.parent_id = 0, r.id, r.parent_id), m.industry_id, m.year, m.month")
     int insertMonthIndustryProvinces();
 
     @Delete("DELETE FROM stat_month_energy")
@@ -95,9 +95,9 @@ public interface SummaryMapper {
     int insertMonthEnergyNational();
 
     @Insert("INSERT INTO stat_month_energy (region_id, energy_id, year, month, emission) " +
-            "SELECT r.parent_id, m.energy_id, m.year, m.month, ROUND(SUM(m.emission), 2) " +
+            "SELECT IF(r.parent_id = 0, r.id, r.parent_id), m.energy_id, m.year, m.month, ROUND(SUM(m.emission), 2) " +
             "FROM fact_emission_month m JOIN dim_region r ON r.id = m.region_id " +
-            "GROUP BY r.parent_id, m.energy_id, m.year, m.month")
+            "GROUP BY IF(r.parent_id = 0, r.id, r.parent_id), m.energy_id, m.year, m.month")
     int insertMonthEnergyProvinces();
 
     @Delete("DELETE FROM stat_city_year")
@@ -146,21 +146,24 @@ public interface SummaryMapper {
                                              @Param("year") int year,
                                              @Param("month") int month);
 
-    /** 全国各市排行 */
-    @Select("SELECT c.id AS regionId, c.region_name AS regionName, s.emission " +
+    /** 全国地级行政区排行（直辖市不参与，仅参与省级排行；含人均） */
+    @Select("SELECT c.id AS regionId, c.region_name AS regionName, s.emission, " +
+            "ROUND(s.emission / c.population / 10000, 2) AS perCapita, c.is_municipality AS isMunicipality " +
             "FROM stat_city_year s JOIN dim_region c ON c.id = s.city_id " +
             "WHERE s.year = #{year} AND c.level = 2 ORDER BY s.emission DESC")
     List<RegionRankVO> selectCityRanking(@Param("year") int year);
 
-    /** 省内各市排行 */
-    @Select("SELECT c.id AS regionId, c.region_name AS regionName, s.emission " +
+    /** 省内各地级行政区排行（直辖市无下辖地级行政区，返回空；含人均） */
+    @Select("SELECT c.id AS regionId, c.region_name AS regionName, s.emission, " +
+            "ROUND(s.emission / c.population / 10000, 2) AS perCapita, c.is_municipality AS isMunicipality " +
             "FROM stat_city_year s JOIN dim_region c ON c.id = s.city_id " +
             "WHERE s.year = #{year} AND c.level = 2 AND c.parent_id = #{provinceId} ORDER BY s.emission DESC")
     List<RegionRankVO> selectCityRankingByProvince(@Param("provinceId") int provinceId,
                                                    @Param("year") int year);
 
-    /** 省级排行（全国口径下各省年度总量） */
-    @Select("SELECT s.region_id AS regionId, r.region_name AS regionName, s.emission " +
+    /** 省级排行（全国口径下各省年度总量，含直辖市标注与人均） */
+    @Select("SELECT s.region_id AS regionId, r.region_name AS regionName, s.emission, " +
+            "ROUND(s.emission / r.population / 10000, 2) AS perCapita, r.is_municipality AS isMunicipality " +
             "FROM stat_year_total s JOIN dim_region r ON r.id = s.region_id " +
             "WHERE s.year = #{year} AND s.region_id != 1 ORDER BY s.emission DESC")
     List<RegionRankVO> selectProvinceRanking(@Param("year") int year);

@@ -19,16 +19,12 @@
           </span>
           <span v-else class="kpi-intensity">碳强度 - tCO₂/万元</span>
         </div>
-        <template v-if="userStore.isAdmin">
-          <el-button class="action-btn" size="small" :loading="generating" @click="handleGenerate">生成模拟数据</el-button>
-          <el-button class="action-btn" size="small" :loading="calculating" @click="handleCalc">执行核算</el-button>
-        </template>
       </div>
     </div>
 
     <!-- 统计卡片（真实数据来自数据字典） -->
-    <el-row :gutter="16" class="stat-row">
-      <el-col :xs="12" :sm="12" :md="6" v-for="card in statCards" :key="card.title">
+    <div class="stat-row">
+      <div v-for="card in statCards" :key="card.title" class="stat-col">
         <div class="tech-stat-card" :style="{ background: card.bg }">
           <div class="stat-icon">
             <el-icon :size="24"><component :is="card.icon" /></el-icon>
@@ -36,8 +32,8 @@
           <div class="stat-value">{{ card.value }}</div>
           <div class="stat-label">{{ card.title }}</div>
         </div>
-      </el-col>
-    </el-row>
+      </div>
+    </div>
 
     <!-- 图表区（弹性占满剩余高度） -->
     <el-row :gutter="16" class="chart-row">
@@ -83,10 +79,8 @@ import { computed, onActivated, onBeforeUnmount, onMounted, reactive, ref } from
 defineOptions({ name: 'DashboardPage' })
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { regionListApi, industryListApi, energyListApi, factorListApi } from '@/api/dict'
-import { dataStatusApi, generateDataApi } from '@/api/data'
-import { executeCalcApi } from '@/api/calc'
+import { dataStatusApi } from '@/api/data'
 import { trendApi, structureApi, energyStructureApi, indirectApi, kpiApi } from '@/api/analysis'
 import { useUserStore } from '@/store/user'
 
@@ -162,10 +156,11 @@ async function onStructTypeChange() {
 
 // ===== 统计卡片 =====
 const statCards = reactive([
-  { title: '覆盖城市', value: '-', icon: 'Location', bg: 'linear-gradient(135deg, #0ea5e9, #0369a1)' },
-  { title: '监测行业', value: '-', icon: 'OfficeBuilding', bg: 'linear-gradient(135deg, #06b6d4, #0e7490)' },
-  { title: '能源品种', value: '-', icon: 'Lightning', bg: 'linear-gradient(135deg, #8b5cf6, #6d28d9)' },
-  { title: '排放因子', value: '-', icon: 'DataAnalysis', bg: 'linear-gradient(135deg, #10b981, #047857)' }
+  { title: '覆盖省级行政区', value: '-', icon: 'MapLocation', bg: 'linear-gradient(135deg, #0ea5e9, #0369a1)' },
+  { title: '覆盖地级行政区', value: '-', icon: 'Location', bg: 'linear-gradient(135deg, #06b6d4, #0e7490)' },
+  { title: '监测行业', value: '-', icon: 'OfficeBuilding', bg: 'linear-gradient(135deg, #8b5cf6, #6d28d9)' },
+  { title: '能源品种', value: '-', icon: 'Lightning', bg: 'linear-gradient(135deg, #10b981, #047857)' },
+  { title: '排放因子', value: '-', icon: 'DataAnalysis', bg: 'linear-gradient(135deg, #f59e0b, #d97706)' }
 ])
 
 async function loadStats() {
@@ -175,10 +170,12 @@ async function loadStats() {
     energyListApi(),
     factorListApi()
   ])
-  statCards[0].value = regions.data.filter(r => r.level === 2).length
-  statCards[1].value = industries.data.length
-  statCards[2].value = energies.data.length
-  statCards[3].value = factors.data.length
+  // 省级行政区含直辖市；地级行政区不含直辖市（直辖市只按省级口径统计）
+  statCards[0].value = regions.data.filter(r => r.level === 1).length
+  statCards[1].value = regions.data.filter(r => r.level === 2).length
+  statCards[2].value = industries.data.length
+  statCards[3].value = energies.data.length
+  statCards[4].value = factors.data.length
 }
 
 // ===== 图表 =====
@@ -210,7 +207,7 @@ function renderTrendChart(rows) {
         type: 'text',
         left: 'center',
         top: 'middle',
-        style: { text: '暂无数据，请先生成模拟数据并执行核算', fill: '#98a4b3', fontSize: 14 }
+        style: { text: '暂无数据', fill: '#98a4b3', fontSize: 14 }
       }
     })
     return
@@ -337,46 +334,9 @@ async function loadDashboardData() {
     } else {
       renderTrendChart([])
       renderPieChart([])
-      ElMessage.info('已有活动数据，请点击「执行核算」生成核算结果')
     }
   } finally {
     endLoad()
-  }
-}
-
-// ===== 生成 / 核算操作 =====
-const generating = ref(false)
-const calculating = ref(false)
-
-async function handleGenerate() {
-  await ElMessageBox.confirm(
-    '将清空旧模拟数据并重新生成（2016 年至今，约 130 万条，耗时约 5 分钟）。是否继续？',
-    '生成模拟数据',
-    { type: 'warning' }
-  )
-  generating.value = true
-  try {
-    const res = await generateDataApi({ mode: 'all', startYear: 2016, injectAnomaly: true })
-    const d = res.data
-    ElMessage.success(`生成完成：${d.totalCount} 条 / 区县 ${d.countyCount} 个 / 注入异常 ${d.anomalyCount} 条 / 耗时 ${d.seconds}s`)
-    await loadDashboardData()
-  } finally {
-    generating.value = false
-  }
-}
-
-async function handleCalc() {
-  await ElMessageBox.confirm('执行核算：月度聚合 → 碳强度 → 年度聚合 → 同比。是否继续？', '执行核算', {
-    type: 'warning'
-  })
-  calculating.value = true
-  try {
-    const res = await executeCalcApi({ startYear: 0, endYear: 0 })
-    const d = res.data
-    ElMessage.success(`核算完成：月度 ${d.monthRows} 行 / 年度 ${d.yearRows} 行 / 耗时 ${d.seconds}s`)
-    await loadDashboardData()
-  } finally {
-    calculating.value = false
   }
 }
 
@@ -451,7 +411,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 14px;
   flex-wrap: wrap;
-  /* 占满整行：KPI 与操作按钮始终在问候语下方，加载前后布局一致（不随内容宽度跳行） */
+  /* 占满整行：KPI 始终在问候语下方，加载前后布局一致（不随内容宽度跳行） */
   flex-basis: 100%;
 }
 .kpi-inline {
@@ -474,19 +434,15 @@ onBeforeUnmount(() => {
 .kpi-intensity {
   color: rgba(255, 255, 255, 0.7);
 }
-.action-btn {
-  background: rgba(255, 255, 255, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  color: #fff;
-}
-.action-btn:hover {
-  background: rgba(255, 255, 255, 0.25);
-  border-color: #fff;
-  color: #fff;
-}
-
 .stat-row {
-  row-gap: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.stat-col {
+  flex: 1 1 170px;
+  min-width: 0;
 }
 .tech-stat-card {
   padding: 14px 18px;

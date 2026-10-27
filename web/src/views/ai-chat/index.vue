@@ -110,7 +110,7 @@
       </div>
 
       <!-- DOCX 在线预览弹窗（docx-preview 渲染） -->
-      <el-dialog v-model="docPreviewVisible" :title="previewDocName" width="80%" top="4vh" destroy-on-close @closed="previewSeq++">
+      <el-dialog v-model="docPreviewVisible" :title="previewDocName" width="80%" top="3vh" destroy-on-close @closed="previewSeq++">
         <div v-if="downloadProgress >= 0 && downloadProgress < 100" class="dl-bar">
           <el-progress :percentage="downloadProgress" :stroke-width="12" striped striped-flow />
           <span class="dl-text">正在加载文档</span>
@@ -119,7 +119,7 @@
       </el-dialog>
 
       <!-- TXT/MD 原文预览弹窗（定位分块） -->
-      <el-dialog v-model="textPreviewVisible" :title="textPreviewName" width="80%" top="4vh" destroy-on-close @closed="previewSeq++">
+      <el-dialog v-model="textPreviewVisible" :title="textPreviewName" width="80%" top="3vh" destroy-on-close @closed="previewSeq++">
         <div v-if="downloadProgress >= 0 && downloadProgress < 100" class="dl-bar">
           <el-progress :percentage="downloadProgress" :stroke-width="12" striped striped-flow />
           <span class="dl-text">正在加载文档</span>
@@ -130,7 +130,7 @@
       </el-dialog>
 
       <!-- PDF 应用内预览弹窗（pdf.js 渲染，不依赖浏览器原生预览） -->
-      <el-dialog v-model="pdfPreviewVisible" :title="pdfPreviewName" width="80%" top="4vh" destroy-on-close @closed="previewSeq++">
+      <el-dialog v-model="pdfPreviewVisible" :title="pdfPreviewName" width="80%" top="3vh" destroy-on-close @closed="previewSeq++">
         <div v-if="downloadProgress >= 0 && downloadProgress < 100" class="dl-bar">
           <el-progress :percentage="downloadProgress" :stroke-width="12" striped striped-flow />
           <span class="dl-text">正在加载文档</span>
@@ -1122,7 +1122,7 @@ onBeforeUnmount(() => {
 /* ===== DOCX 预览 ===== */
 .docx-container {
   min-height: 300px;
-  max-height: calc(100vh - 220px);
+  max-height: calc(100vh - 150px);
   overflow-y: auto;
   background: #f0f2f5;
   padding: 12px;
@@ -1152,7 +1152,7 @@ onBeforeUnmount(() => {
 /* ===== TXT/MD 原文预览 ===== */
 .text-container {
   min-height: 300px;
-  max-height: calc(100vh - 220px);
+  max-height: calc(100vh - 150px);
   overflow-y: auto;
   background: #fff;
   border: 1px solid #eef2f7;
@@ -1194,7 +1194,7 @@ onBeforeUnmount(() => {
 /* ===== PDF 应用内预览 ===== */
 .pdf-container {
   min-height: 300px;
-  max-height: calc(100vh - 220px);
+  max-height: calc(100vh - 150px);
   overflow-y: auto;
   background: #525659;
   padding: 16px;

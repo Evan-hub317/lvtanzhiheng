@@ -1,7 +1,11 @@
 package com.smart.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.smart.dto.DetailQueryDTO;
 import com.smart.entity.FactEmissionMonth;
+import com.smart.vo.DetailVO;
 import com.smart.vo.AnomalyPointVO;
 import com.smart.vo.EnergyStructureVO;
 import com.smart.vo.MonthPointVO;
@@ -72,7 +76,7 @@ public interface FactEmissionMonthMapper extends BaseMapper<FactEmissionMonth> {
             "ROUND(SUM(f.consumption) * fe.factor_value * fe.oxid_rate, 4), fe.factor_value, fe.oxid_rate, NOW() " +
             "FROM fact_energy_month f " +
             "JOIN dim_region r ON r.id = f.region_id " +
-            "JOIN dim_region p ON p.id = IF(r.level = 2, r.parent_id, r.id) " +
+            "JOIN dim_region p ON p.id = IF(r.level = 1, r.id, r.parent_id) " +
             "JOIN province_param pp ON pp.region_id = p.id " +
             "JOIN factor_emission fe ON fe.energy_id = 7 AND fe.grid_code = pp.grid_code " +
             "WHERE f.energy_id = 7 AND f.year BETWEEN #{startYear} AND #{endYear} " +
@@ -205,14 +209,101 @@ public interface FactEmissionMonthMapper extends BaseMapper<FactEmissionMonth> {
                                            @Param("sy") int sy, @Param("sm") int sm,
                                            @Param("ey") int ey, @Param("em") int em);
 
-    /** 各省时段总量（汇总表为空时地图/TOP10 的回退数据源） */
-    @Select("SELECT r.parent_id AS regionId, p.region_name AS regionName, ROUND(SUM(m.emission), 2) AS emission " +
+    /** 各省时段总量（汇总表为空时地图/TOP10 的回退数据源；直辖市 parent=0 归自身） */
+    @Select("SELECT IF(r.parent_id = 0, r.id, r.parent_id) AS regionId, p.region_name AS regionName, ROUND(SUM(m.emission), 2) AS emission " +
             "FROM fact_emission_month m JOIN dim_region r ON r.id = m.region_id " +
-            "JOIN dim_region p ON p.id = r.parent_id " +
+            "JOIN dim_region p ON p.id = IF(r.parent_id = 0, r.id, r.parent_id) " +
             "WHERE m.energy_id <= 6 " +
             "AND (m.year > #{sy} OR (m.year = #{sy} AND m.month >= #{sm})) " +
             "AND (m.year < #{ey} OR (m.year = #{ey} AND m.month <= #{em})) " +
-            "GROUP BY r.parent_id, p.region_name ORDER BY emission DESC")
+            "GROUP BY IF(r.parent_id = 0, r.id, r.parent_id), p.region_name ORDER BY emission DESC")
     List<RegionRankVO> selectPeriodProvinces(@Param("sy") int sy, @Param("sm") int sm,
                                              @Param("ey") int ey, @Param("em") int em);
+
+    /** 全省：排放明细分页（月度粒度；同比=去年同月） */
+    @Select("<script>" +
+            "SELECT r.region_name AS regionName, i.industry_name AS industryName, " +
+            "e.energy_name AS energyName, y.year, y.month, y.emission, " +
+            "CASE WHEN p.emission IS NOT NULL AND p.emission &gt; 0 " +
+            "THEN ROUND((y.emission - p.emission) / p.emission * 100, 2) END AS yoyRate, " +
+            "ROUND(y.emission / r.population / 10000, 4) AS perCapita " +
+            "FROM fact_emission_month y " +
+            "JOIN dim_region r ON r.id = y.region_id " +
+            "JOIN dim_industry i ON i.id = y.industry_id " +
+            "JOIN dim_energy e ON e.id = y.energy_id " +
+            "LEFT JOIN fact_emission_month p ON p.region_id = y.region_id AND p.industry_id = y.industry_id " +
+            "AND p.energy_id = y.energy_id AND p.year = y.year - 1 AND p.month = y.month " +
+            "WHERE 1=1 " +
+            "<if test='q.year != null'> AND y.year = #{q.year}</if> " +
+            "<if test='q.month != null'> AND y.month = #{q.month}</if> " +
+            "<if test='q.industryId != null'> AND y.industry_id = #{q.industryId}</if> " +
+            "<if test='q.energyId != null'> AND y.energy_id = #{q.energyId}</if> " +
+            "<if test='q.minEmission != null'> AND y.emission &gt;= #{q.minEmission}</if> " +
+            "<if test='q.maxEmission != null'> AND y.emission &lt;= #{q.maxEmission}</if> " +
+            "<if test='q.minPerCapita != null'> AND (y.emission / r.population / 10000) &gt;= #{q.minPerCapita}</if> " +
+            "<if test='q.maxPerCapita != null'> AND (y.emission / r.population / 10000) &lt;= #{q.maxPerCapita}</if> " +
+            "ORDER BY ${sortSql}" +
+            "</script>")
+    IPage<DetailVO> selectDetailAllMonth(Page<DetailVO> page, @Param("q") DetailQueryDTO q, @Param("sortSql") String sortSql);
+
+    /** 指定区域：排放明细分页（月度粒度；同比=去年同月） */
+    @Select("<script>" +
+            "SELECT r.region_name AS regionName, i.industry_name AS industryName, " +
+            "e.energy_name AS energyName, y.year, y.month, y.emission, " +
+            "CASE WHEN p.emission IS NOT NULL AND p.emission &gt; 0 " +
+            "THEN ROUND((y.emission - p.emission) / p.emission * 100, 2) END AS yoyRate, " +
+            "ROUND(y.emission / r.population / 10000, 4) AS perCapita " +
+            "FROM fact_emission_month y " +
+            "JOIN dim_region r ON r.id = y.region_id " +
+            "JOIN dim_industry i ON i.id = y.industry_id " +
+            "JOIN dim_energy e ON e.id = y.energy_id " +
+            "LEFT JOIN fact_emission_month p ON p.region_id = y.region_id AND p.industry_id = y.industry_id " +
+            "AND p.energy_id = y.energy_id AND p.year = y.year - 1 AND p.month = y.month " +
+            "WHERE y.region_id IN " +
+            "(SELECT id FROM dim_region WHERE id = #{q.regionId} OR parent_id = #{q.regionId}) " +
+            "<if test='q.year != null'> AND y.year = #{q.year}</if> " +
+            "<if test='q.month != null'> AND y.month = #{q.month}</if> " +
+            "<if test='q.industryId != null'> AND y.industry_id = #{q.industryId}</if> " +
+            "<if test='q.energyId != null'> AND y.energy_id = #{q.energyId}</if> " +
+            "<if test='q.minEmission != null'> AND y.emission &gt;= #{q.minEmission}</if> " +
+            "<if test='q.maxEmission != null'> AND y.emission &lt;= #{q.maxEmission}</if> " +
+            "<if test='q.minPerCapita != null'> AND (y.emission / r.population / 10000) &gt;= #{q.minPerCapita}</if> " +
+            "<if test='q.maxPerCapita != null'> AND (y.emission / r.population / 10000) &lt;= #{q.maxPerCapita}</if> " +
+            "ORDER BY ${sortSql}" +
+            "</script>")
+    IPage<DetailVO> selectDetailByRegionMonth(Page<DetailVO> page, @Param("q") DetailQueryDTO q, @Param("sortSql") String sortSql);
+
+    /** 某月省级行政区排行（含人均；可选行业/能源筛选） */
+    @Select("<script>" +
+            "SELECT p.id AS regionId, p.region_name AS regionName, ROUND(SUM(m.emission), 2) AS emission, " +
+            "ROUND(SUM(m.emission) / p.population / 10000, 2) AS perCapita, p.is_municipality AS isMunicipality " +
+            "FROM fact_emission_month m " +
+            "JOIN dim_region r ON r.id = m.region_id " +
+            "JOIN dim_region p ON p.id = IF(r.level = 1, r.id, r.parent_id) " +
+            "WHERE m.year = #{year} AND m.month = #{month} " +
+            "<if test='industryId != null'> AND m.industry_id = #{industryId}</if>" +
+            "<if test='energyId != null'> AND m.energy_id = #{energyId}</if>" +
+            "<if test='energyId == null'> AND m.energy_id &lt;= 6</if>" +
+            "GROUP BY p.id, p.region_name, p.population, p.is_municipality ORDER BY emission DESC" +
+            "</script>")
+    List<RegionRankVO> selectMonthRankingProvince(@Param("year") int year, @Param("month") int month,
+                                                  @Param("industryId") Integer industryId,
+                                                  @Param("energyId") Integer energyId);
+
+    /** 某月地级行政区排行（provinceId 为 null 时全国；含人均；可选行业/能源筛选） */
+    @Select("<script>" +
+            "SELECT c.id AS regionId, c.region_name AS regionName, ROUND(SUM(m.emission), 2) AS emission, " +
+            "ROUND(SUM(m.emission) / c.population / 10000, 2) AS perCapita, c.is_municipality AS isMunicipality " +
+            "FROM fact_emission_month m JOIN dim_region c ON c.id = m.region_id " +
+            "WHERE m.year = #{year} AND m.month = #{month} AND c.level = 2 " +
+            "<if test='provinceId != null'> AND c.parent_id = #{provinceId}</if>" +
+            "<if test='industryId != null'> AND m.industry_id = #{industryId}</if>" +
+            "<if test='energyId != null'> AND m.energy_id = #{energyId}</if>" +
+            "<if test='energyId == null'> AND m.energy_id &lt;= 6</if>" +
+            "GROUP BY c.id, c.region_name, c.population, c.is_municipality ORDER BY emission DESC" +
+            "</script>")
+    List<RegionRankVO> selectMonthRankingCity(@Param("year") int year, @Param("month") int month,
+                                              @Param("provinceId") Integer provinceId,
+                                              @Param("industryId") Integer industryId,
+                                              @Param("energyId") Integer energyId);
 }

@@ -208,7 +208,7 @@ const TOOL_META = {
   query_kpi: { label: '了解现状', desc: '查询核心指标，掌握当前排放水平' },
   query_trend: { label: '回顾趋势', desc: '查询历史年度序列，观察演变规律' },
   query_structure: { label: '剖析结构', desc: '查询行业排放构成' },
-  run_calc: { label: '核算数据', desc: '重新执行碳核算，校准数据基础' },
+  run_calc: { label: '核算数据', desc: '汇总排放核算结果，保证数据口径一致' },
   predict_emission: { label: '预测未来', desc: 'LSTM 外推未来趋势，判断达峰' },
   detect_anomaly: { label: '筛查异常', desc: '孤立森林检测异常排放点' },
   simulate_policy: { label: '推演政策', desc: '情景仿真，测算政策减排效果' },

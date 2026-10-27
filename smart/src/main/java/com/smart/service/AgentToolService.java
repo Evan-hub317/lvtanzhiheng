@@ -99,7 +99,7 @@ public class AgentToolService {
             // 含未来年份：引导走独立的预测步骤（predict_emission 提供含未来段的图表）
             return Map.of("summary", end + " 年为未来年份，暂无核算数据；请先调用 predict_emission 工具获得含预测的完整趋势");
         }
-        List<TrendVO> rows = analysisService.trend(regionId, start, end, null);
+        List<TrendVO> rows = analysisService.trend(regionId, start, end, null, null);
         return trendResult(rows, "排放趋势");
     }
 
@@ -227,7 +227,7 @@ public class AgentToolService {
             }
             totalYi = p.getValues().get(idx).divide(BigDecimal.valueOf(1e8), 2, RoundingMode.HALF_UP);
         } else {
-            List<TrendVO> rows = analysisService.trend(regionId, y, y, null);
+            List<TrendVO> rows = analysisService.trend(regionId, y, y, null, null);
             if (rows.isEmpty()) {
                 return Map.of("summary", y + " 年暂无该区域数据");
             }
@@ -241,7 +241,7 @@ public class AgentToolService {
             thresholdSource = "自定义";
         } else {
             int baseYear = latestFullYear();
-            List<TrendVO> baseRows = analysisService.trend(regionId, baseYear, baseYear, null);
+            List<TrendVO> baseRows = analysisService.trend(regionId, baseYear, baseYear, null, null);
             if (!baseRows.isEmpty() && baseRows.get(0).getEmission().signum() > 0) {
                 thresholdYi = baseRows.get(0).getEmission()
                         .multiply(BigDecimal.valueOf(1.05))
@@ -287,10 +287,10 @@ public class AgentToolService {
         String scope;
         if (region != null) {
             int provinceId = resolveRegionId(region);
-            rows = analysisService.cityRankingByProvince(provinceId, y);
+            rows = analysisService.cityRankingByProvince(provinceId, y, null, null);
             scope = resolveName(region) + " 各市";
         } else {
-            rows = analysisService.regionRanking(y);
+            rows = analysisService.regionRanking(y, null, null);
             scope = "各市";
         }
         if (rows == null || rows.isEmpty()) {

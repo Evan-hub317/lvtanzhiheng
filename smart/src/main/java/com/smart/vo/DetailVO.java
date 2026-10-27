@@ -18,8 +18,14 @@ public class DetailVO {
 
     private Integer year;
 
-    /** 排放量（tCO2） */
+    /** 月度粒度时的月份（年度粒度下为 null） */
+    private Integer month;
+
+    /** 总排放量（tCO2） */
     private BigDecimal emission;
+
+    /** 人均排放量（tCO2/人，按区域常住人口；人口固定口径下人均同比与总量同比一致） */
+    private BigDecimal perCapita;
 
     /** 同比增速（%） */
     private BigDecimal yoyRate;

@@ -157,9 +157,11 @@ public class DataGenerateService {
             energyMonthMapper.deleteMonth(endYear, endMonth);
         }
 
-        // 3. 加载市级区域与省级参数
+        // 3. 加载生成区域：地级行政区（level=2）+ 直辖市（既是省也是市）+ 省直辖县级行政区（level=3）
         List<DimRegion> cities = regionMapper.selectList(new LambdaQueryWrapper<DimRegion>()
-                .eq(DimRegion::getLevel, 2));
+                .and(w -> w.eq(DimRegion::getLevel, 2)
+                        .or().eq(DimRegion::getIsMunicipality, 1)
+                        .or().eq(DimRegion::getLevel, 3)));
         Map<Integer, ProvinceParam> paramByProvince = new HashMap<>();
         for (ProvinceParam p : paramMapper.selectList(null)) {
             paramByProvince.put(p.getRegionId(), p);
@@ -176,7 +178,10 @@ public class DataGenerateService {
         List<FactEnergyMonth> batch = new ArrayList<>(2000);
 
         for (DimRegion city : cities) {
-            ProvinceParam param = paramByProvince.get(city.getParentId());
+            // 省级参数：地级/县级取 parent（省）；直辖市 parent=0，参数在自身
+            int provinceId = (city.getParentId() != null && city.getParentId() > 0)
+                    ? city.getParentId() : city.getId();
+            ProvinceParam param = paramByProvince.get(provinceId);
             if (param == null || city.getGdp() == null || city.getGdp().signum() <= 0) {
                 noParamCount++;
                 continue;

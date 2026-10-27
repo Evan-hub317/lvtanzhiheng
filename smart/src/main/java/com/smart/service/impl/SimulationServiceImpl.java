@@ -192,7 +192,7 @@ public class SimulationServiceImpl implements SimulationService {
         }
 
         // 最新年总排放为基准
-        List<TrendVO> rows = analysisService.trend(dto.getRegionId(), baseYear, baseYear, null);
+        List<TrendVO> rows = analysisService.trend(dto.getRegionId(), baseYear, baseYear, null, null);
         if (rows.isEmpty()) {
             throw new BizException("暂无核算数据，请先生成模拟数据并执行核算");
         }
@@ -202,7 +202,7 @@ public class SimulationServiceImpl implements SimulationService {
         req.put("base_year", baseYear);
         req.put("base_emission", baseEmission.doubleValue());
         // 历史年度序列：仿真模型据此校准基准增速（基准情景与历史趋势一致）
-        req.put("history", analysisService.trend(dto.getRegionId(), status.getMinYear(), baseYear, null).stream()
+        req.put("history", analysisService.trend(dto.getRegionId(), status.getMinYear(), baseYear, null, null).stream()
                 .map(t -> {
                     Map<String, Object> item = new HashMap<>();
                     item.put("year", t.getYear());

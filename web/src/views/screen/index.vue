@@ -65,7 +65,7 @@
             <div class="kpi-value">{{ intensity ?? '-' }}<span v-if="intensity !== null"> tCO₂/万元</span></div>
           </div>
           <div class="kpi-item">
-            <div class="kpi-label">监测城市</div>
+            <div class="kpi-label">监测地级行政区</div>
             <div class="kpi-value">{{ cityCount }} <span>个</span></div>
           </div>
         </div>
@@ -79,12 +79,16 @@
         </div>
       </div>
 
-      <!-- 右侧：排行 + 行业结构 -->
+      <!-- 右侧：排行 + 行业/能源结构（面板高度不变，超出内部滚动） -->
       <div class="side-panel" v-loading="loading" element-loading-text="加载中…" element-loading-background="rgba(10, 20, 40, 0.6)">
-        <div class="panel-title">省份排放 TOP10</div>
+        <div class="panel-title">省级行政区排放 TOP10</div>
         <div ref="rankRef" class="rank-chart"></div>
         <div class="panel-title sub">行业结构</div>
         <div ref="industryRef" class="structure-chart"></div>
+        <div class="panel-title sub">能源结构（直接）</div>
+        <div ref="directRef" class="structure-chart"></div>
+        <div class="panel-title sub">能源结构（间接）</div>
+        <div ref="indirectRef" class="structure-chart"></div>
       </div>
     </div>
 
@@ -102,12 +106,12 @@
             <div class="dkpi-value">{{ provinceIntensity ?? '-' }} tCO₂/万元</div>
           </div>
         </div>
+        <div class="drawer-chart-title">行业结构</div>
+        <div ref="provincePieRef" class="drawer-chart"></div>
         <div class="drawer-chart-title">能源结构（直接）</div>
         <div ref="provinceDirectRef" class="drawer-chart"></div>
         <div class="drawer-chart-title">能源结构（间接）</div>
         <div ref="provinceIndirectRef" class="drawer-chart"></div>
-        <div class="drawer-chart-title">行业结构</div>
-        <div ref="provincePieRef" class="drawer-chart"></div>
       </div>
     </el-drawer>
   </div>
@@ -138,7 +142,9 @@ let clockTimer = null
 const mapRef = ref()
 const rankRef = ref()
 const industryRef = ref()
-let mapChart, rankChart, industryChart
+const directRef = ref()
+const indirectRef = ref()
+let mapChart, rankChart, industryChart, directChart, indirectChart
 
 /** 时段文案：2025年1月 - 2025年12月 */
 const periodText = computed(() => {
@@ -285,6 +291,8 @@ async function loadScreenData() {
     renderMap(d.regions || [])
     renderRank(d.regions || [])
     renderIndustry(d.industries || [])
+    renderEnergyDirect(d.direct || [])
+    renderEnergyIndirect(d.indirect || [])
   } finally {
     loading.value = false
   }
@@ -396,6 +404,37 @@ function renderIndustry(rows) {
   industryChart.resize()
 }
 
+/** 右栏能源结构饼图（深色主题，亿吨单位） */
+function renderEnergyDirect(rows) {
+  renderEnergyPie(directRef.value, 'direct', rows, ['#22d3ee', '#4ade80', '#fbbf24', '#a78bfa', '#f87171', '#f472b6', '#94a3b8', '#34d399'])
+}
+
+function renderEnergyIndirect(rows) {
+  renderEnergyPie(indirectRef.value, 'indirect', rows, ['#fbbf24', '#f87171', '#fb923c'])
+}
+
+function renderEnergyPie(el, key, rows, colors) {
+  const chart = echarts.getInstanceByDom(el) || echarts.init(el)
+  if (key === 'direct') directChart = chart
+  else indirectChart = chart
+  if (!rows?.length) {
+    chart.setOption({ graphic: emptyScreenGraphic('暂无数据') }, true)
+    return
+  }
+  chart.setOption({
+    tooltip: { trigger: 'item', formatter: '{b}：{c} 亿吨（{d}%）' },
+    legend: { bottom: 0, type: 'scroll', icon: 'circle', textStyle: { color: '#7ea6c8', fontSize: 10 } },
+    color: colors,
+    series: [{
+      type: 'pie', radius: ['40%', '62%'], center: ['50%', '44%'],
+      label: { color: '#c9e2f5', fontSize: 10, formatter: '{b}\n{d}%' },
+      itemStyle: { borderColor: '#0a1428', borderWidth: 1 },
+      data: rows.map(r => ({ name: r.energyName, value: Number((r.emission / 1e8).toFixed(2)) }))
+    }]
+  })
+  chart.resize()
+}
+
 function emptyScreenGraphic(text) {
   return { type: 'text', left: 'center', top: 'middle', style: { text, fill: '#7ea6c8', fontSize: 13 } }
 }
@@ -475,6 +514,8 @@ function handleResize() {
   mapChart?.resize()
   rankChart?.resize()
   industryChart?.resize()
+  directChart?.resize()
+  indirectChart?.resize()
   provinceDirectChart?.resize()
   provinceIndirectChart?.resize()
   provincePieChart?.resize()
@@ -505,6 +546,8 @@ onBeforeUnmount(() => {
   mapChart?.dispose()
   rankChart?.dispose()
   industryChart?.dispose()
+  directChart?.dispose()
+  indirectChart?.dispose()
   provinceDirectChart?.dispose()
   provinceIndirectChart?.dispose()
   provincePieChart?.dispose()
@@ -725,8 +768,7 @@ onBeforeUnmount(() => {
 }
 
 .rank-chart {
-  flex: 1;
-  min-height: 140px;
+  flex: 0 0 240px; /* 固定高度：排行图不再占满剩余空间，多余空间留在面板底部 */
 }
 .structure-chart {
   height: 220px;

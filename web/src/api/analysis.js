@@ -14,6 +14,15 @@ export const monthlyTrendApi = params => request.get('/analysis/monthly-trend', 
 
 export const regionRankingApi = params => request.get('/analysis/region-ranking', { params })
 
+// 各省排放排行（复用大屏地图数据源接口）
+export const provinceRankingApi = params => request.get('/analysis/map', { params })
+
+// 某省下辖各地级行政区排放排行
+export const cityRankingApi = params => request.get('/analysis/city-ranking', { params })
+
+// 某月排行（scope=province 省级 / city 地级）
+export const monthRankingApi = params => request.get('/analysis/month-ranking', { params })
+
 export const mapDataApi = params => request.get('/analysis/map', { params })
 
 export const detailPageApi = params => request.get('/analysis/detail', { params })
