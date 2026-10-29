@@ -46,8 +46,8 @@ public class AlertServiceImpl implements AlertService {
     /** AI 检测结果入库上限（按异常分数降序取前 N） */
     private static final int AI_TOP_LIMIT = 100;
 
-    /** 省级区域ID（行业级预警归属口径） */
-    private static final int PROVINCE_REGION_ID = 1;
+    /** 全国哨兵值：dim_region 无 id=1 行，stat 表与预警记录以 region_id=1 表示全国口径 */
+    private static final int NATIONAL_REGION_ID = 1;
 
     private final AlertRuleMapper ruleMapper;
     private final AlertRecordMapper recordMapper;
@@ -85,17 +85,19 @@ public class AlertServiceImpl implements AlertService {
     }
 
     /**
-     * 环比超限规则：行业月度排放环比增幅 > 阈值
+     * 环比超限规则：行业×能源月度排放环比增幅 > 阈值（全国口径，仅直接能源 energy_id≤6——
+     * 电力/热力为间接排放单列展示、不计总量，季节摆动大，不参与环比检测）
+     * 规则名标注具体能源（如「行业月度排放环比增幅超限·原煤」），与 AI 检测的命名方式一致
      */
     private int scanMomRule(AlertRule rule) {
-        List<AnomalyPointVO> rows = monthMapper.selectIndustryMonthly();
-        Map<Integer, List<AnomalyPointVO>> byIndustry = new LinkedHashMap<>();
+        List<AnomalyPointVO> rows = monthMapper.selectIndustryEnergyMonthly(true);
+        Map<String, List<AnomalyPointVO>> bySeries = new LinkedHashMap<>();
         for (AnomalyPointVO row : rows) {
-            byIndustry.computeIfAbsent(row.getIndustryId(), k -> new ArrayList<>()).add(row);
+            bySeries.computeIfAbsent(row.getIndustryId() + "-" + row.getEnergyId(), k -> new ArrayList<>()).add(row);
         }
+        Map<Integer, String> energyNameMap = loadEnergyNameMap();
         int count = 0;
-        for (Map.Entry<Integer, List<AnomalyPointVO>> entry : byIndustry.entrySet()) {
-            List<AnomalyPointVO> series = entry.getValue();
+        for (List<AnomalyPointVO> series : bySeries.values()) {
             for (int i = 1; i < series.size(); i++) {
                 BigDecimal prev = series.get(i - 1).getEmission();
                 BigDecimal cur = series.get(i).getEmission();
@@ -105,18 +107,21 @@ public class AlertServiceImpl implements AlertService {
                 BigDecimal mom = cur.subtract(prev).multiply(BigDecimal.valueOf(100))
                         .divide(prev, 2, RoundingMode.HALF_UP);
                 if (mom.compareTo(rule.getThresholdValue()) > 0) {
-                    if (existsRecord(rule.getId(), PROVINCE_REGION_ID, entry.getKey(),
-                            series.get(i).getYear(), series.get(i).getMonth())) {
+                    AnomalyPointVO point = series.get(i);
+                    String ruleName = rule.getRuleName() + "·"
+                            + energyNameMap.getOrDefault(point.getEnergyId(), "能源" + point.getEnergyId());
+                    if (existsRecord(rule.getId(), NATIONAL_REGION_ID, point.getIndustryId(),
+                            point.getYear(), point.getMonth(), ruleName)) {
                         continue;
                     }
                     AlertRecord record = new AlertRecord();
                     record.setRuleId(rule.getId());
-                    record.setRuleName(rule.getRuleName());
+                    record.setRuleName(ruleName);
                     record.setDetectType(1);
-                    record.setRegionId(PROVINCE_REGION_ID);
-                    record.setIndustryId(entry.getKey());
-                    record.setYear(series.get(i).getYear());
-                    record.setMonth(series.get(i).getMonth());
+                    record.setRegionId(NATIONAL_REGION_ID);
+                    record.setIndustryId(point.getIndustryId());
+                    record.setYear(point.getYear());
+                    record.setMonth(point.getMonth());
                     record.setActualValue(mom);
                     record.setThresholdValue(rule.getThresholdValue());
                     record.setStatus(0);
@@ -129,10 +134,11 @@ public class AlertServiceImpl implements AlertService {
     }
 
     /**
-     * 总量上限规则：年度区域排放总量 > 阈值
+     * 总量上限规则：年度区域排放总量 > 阈值（规则名标注区域，如「区域年度排放总量超上限·全国」；
+     * 该规则无能源维度，不标注能源，避免与直接能源口径的检测结果混淆）
      */
     private int scanTotalRule(AlertRule rule) {
-        List<AnomalyPointVO> rows = monthMapper.selectIndustryMonthly();
+        List<AnomalyPointVO> rows = monthMapper.selectIndustryEnergyMonthly(false);
         Map<Integer, BigDecimal> yearTotal = new LinkedHashMap<>();
         for (AnomalyPointVO row : rows) {
             yearTotal.merge(row.getYear(), row.getEmission(), BigDecimal::add);
@@ -140,13 +146,14 @@ public class AlertServiceImpl implements AlertService {
         int count = 0;
         for (Map.Entry<Integer, BigDecimal> entry : yearTotal.entrySet()) {
             if (entry.getValue().compareTo(rule.getThresholdValue()) > 0) {
-                int regionId = rule.getDimensionId() != null ? rule.getDimensionId() : PROVINCE_REGION_ID;
-                if (existsRecord(rule.getId(), regionId, 0, entry.getKey(), null)) {
+                int regionId = rule.getDimensionId() != null ? rule.getDimensionId() : NATIONAL_REGION_ID;
+                String ruleName = rule.getRuleName() + "·" + regionDisplayName(regionId);
+                if (existsRecord(rule.getId(), regionId, 0, entry.getKey(), null, ruleName)) {
                     continue;
                 }
                 AlertRecord record = new AlertRecord();
                 record.setRuleId(rule.getId());
-                record.setRuleName(rule.getRuleName());
+                record.setRuleName(ruleName);
                 record.setDetectType(1);
                 record.setRegionId(regionId);
                 record.setIndustryId(0);
@@ -161,42 +168,47 @@ public class AlertServiceImpl implements AlertService {
         return count;
     }
 
+    /** 能源名称表（阈值规则名标注用） */
+    private Map<Integer, String> loadEnergyNameMap() {
+        return energyMapper.selectList(null).stream()
+                .collect(Collectors.toMap(DimEnergy::getId, DimEnergy::getEnergyName, (a, b) -> a));
+    }
+
+    /** 区域显示名：region_id=1 为全国哨兵值（dim_region 无该行），其余按区域表取名 */
+    private String regionDisplayName(int regionId) {
+        if (regionId == NATIONAL_REGION_ID) {
+            return "全国";
+        }
+        DimRegion region = regionMapper.selectById(regionId);
+        return region != null ? region.getRegionName() : "区域" + regionId;
+    }
+
     @Override
     public Map<String, Object> runAnomalyDetection() {
         long start = System.currentTimeMillis();
-        // 1. 全量检测点：区县×行业×能源×月
+        // 1. 全量检测点：区县×行业×直接能源×月（间接能源不参与异常检测）
         List<AnomalyPointVO> points = monthMapper.selectAnomalyPoints();
         if (points.isEmpty()) {
-            throw new BizException("暂无核算数据，请先生成模拟数据并执行核算");
+            throw new BizException("暂无核算数据");
         }
         // 2. 按 (industry, energy) 分组建模：同组内各行业的季节规律一致，
-        //    区县规模差异由标准化消除；24 组一次批量调用，秒级完成
+        //    区县规模差异由标准化消除
         Map<String, List<AnomalyPointVO>> seriesMap = new LinkedHashMap<>();
         for (AnomalyPointVO p : points) {
             String key = p.getIndustryId() + "-" + p.getEnergyId();
             seriesMap.computeIfAbsent(key, k -> new ArrayList<>()).add(p);
         }
-        List<Map<String, Object>> seriesList = seriesMap.entrySet().stream().map(entry -> {
-            Map<String, Object> series = new HashMap<>();
-            series.put("key", entry.getKey());
-            series.put("points", entry.getValue().stream().map(p -> {
-                Map<String, Object> pt = new HashMap<>();
-                pt.put("regionId", p.getRegionId());
-                pt.put("year", p.getYear());
-                pt.put("month", p.getMonth());
-                pt.put("value", p.getEmission());
-                return pt;
-            }).collect(Collectors.toList()));
-            return series;
-        }).collect(Collectors.toList());
 
-        // 3. 一次批量调用算法服务
-        List<JSONObject> allAnomalies = callAnomalyBatch(seriesList);
+        // 3. 分批调用算法服务：全量数据点约 115 万条，一次性序列化会撑爆 JVM 堆，
+        //    每批只物化本批 JSON，批间及时被 GC 回收
+        List<JSONObject> allAnomalies = callAnomalyBatched(new ArrayList<>(seriesMap.entrySet()));
 
-        // 4. 重扫幂等：清除旧 AI 记录，按分数降序取 top N 入库
+        // 4. 分批调用后各批 score 仅批内归一：用 raw 重做全局归一化（与单次调用口径一致）
+        globalNormalize(allAnomalies);
+
+        // 5. 重扫幂等：清除旧 AI 记录，按分数降序取 top N 入库
         recordMapper.deleteByDetectType(2);
-        Map<Integer, String> energyNameMap = energyMapper.selectList(null).stream()
-                .collect(Collectors.toMap(DimEnergy::getId, DimEnergy::getEnergyName, (a, b) -> a));
+        Map<Integer, String> energyNameMap = loadEnergyNameMap();
         allAnomalies.sort(Comparator.comparing(a -> a.getBigDecimal("score"), Comparator.reverseOrder()));
         int top = Math.min(allAnomalies.size(), AI_TOP_LIMIT);
         for (int i = 0; i < top; i++) {
@@ -229,13 +241,69 @@ public class AlertServiceImpl implements AlertService {
         return result;
     }
 
+    /** 每批发送的序列数（约 48k 点/序列，8 序列/批 ≈ 38 万点，JSON 约 40MB，内存可控） */
+    private static final int ANOMALY_SERIES_PER_BATCH = 8;
+
     /**
-     * 调算法服务检测一批序列，返回异常点列表
+     * 分批调算法服务检测，合并各批异常点返回
      */
-    private List<JSONObject> callAnomalyBatch(List<Map<String, Object>> batch) {
-        JSONArray data = algoClient.postArray("/api/alg/anomaly",
-                cn.hutool.json.JSONUtil.parseObj(cn.hutool.json.JSONUtil.toJsonStr(Map.of("series", batch))));
-        return data == null ? new ArrayList<>() : data.toList(JSONObject.class);
+    private List<JSONObject> callAnomalyBatched(List<Map.Entry<String, List<AnomalyPointVO>>> seriesEntries) {
+        List<JSONObject> result = new ArrayList<>();
+        for (int i = 0; i < seriesEntries.size(); i += ANOMALY_SERIES_PER_BATCH) {
+            List<Map<String, Object>> batch = new ArrayList<>();
+            for (int j = i; j < Math.min(i + ANOMALY_SERIES_PER_BATCH, seriesEntries.size()); j++) {
+                Map.Entry<String, List<AnomalyPointVO>> entry = seriesEntries.get(j);
+                Map<String, Object> series = new HashMap<>();
+                series.put("key", entry.getKey());
+                series.put("points", entry.getValue().stream().map(p -> {
+                    Map<String, Object> pt = new HashMap<>();
+                    pt.put("regionId", p.getRegionId());
+                    pt.put("year", p.getYear());
+                    pt.put("month", p.getMonth());
+                    pt.put("value", p.getEmission());
+                    return pt;
+                }).collect(Collectors.toList()));
+                batch.add(series);
+            }
+            JSONArray data = algoClient.postArray("/api/alg/anomaly", Map.of("series", batch));
+            if (data != null) {
+                result.addAll(data.toList(JSONObject.class));
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 分批检测后按 raw 重做全局 min-max 归一化（分数越接近 1 越异常），
+     * 与算法服务单次调用时的全局归一化口径一致
+     */
+    private void globalNormalize(List<JSONObject> anomalies) {
+        if (anomalies.isEmpty()) {
+            return;
+        }
+        BigDecimal lo = null;
+        BigDecimal hi = null;
+        for (JSONObject a : anomalies) {
+            BigDecimal raw = a.getBigDecimal("raw");
+            if (raw == null) {
+                continue;
+            }
+            lo = lo == null ? raw : lo.min(raw);
+            hi = hi == null ? raw : hi.max(raw);
+        }
+        if (lo == null || hi == null) {
+            return;
+        }
+        BigDecimal span = hi.subtract(lo).signum() > 0
+                ? hi.subtract(lo) : new BigDecimal("0.000000001");
+        for (JSONObject a : anomalies) {
+            BigDecimal raw = a.getBigDecimal("raw");
+            if (raw == null) {
+                continue;
+            }
+            a.set("score", hi.subtract(raw).divide(span, 4, RoundingMode.HALF_UP));
+            a.remove("raw");
+        }
     }
 
     @Override
@@ -292,12 +360,19 @@ public class AlertServiceImpl implements AlertService {
     }
 
     private boolean existsRecord(Integer ruleId, int regionId, int industryId, Integer year, Integer month) {
+        return existsRecord(ruleId, regionId, industryId, year, month, null);
+    }
+
+    /** ruleName 参与去重：环比规则按「行业×能源」检测，同行业同月不同能源各自成条 */
+    private boolean existsRecord(Integer ruleId, int regionId, int industryId, Integer year, Integer month,
+                                 String ruleName) {
         return recordMapper.selectCount(new LambdaQueryWrapper<AlertRecord>()
                 .eq(ruleId != null, AlertRecord::getRuleId, ruleId)
                 .eq(AlertRecord::getRegionId, regionId)
                 .eq(AlertRecord::getIndustryId, industryId)
                 .eq(AlertRecord::getYear, year)
                 .eq(month != null, AlertRecord::getMonth, month)
-                .isNull(month == null, AlertRecord::getMonth)) > 0;
+                .isNull(month == null, AlertRecord::getMonth)
+                .eq(ruleName != null, AlertRecord::getRuleName, ruleName)) > 0;
     }
 }

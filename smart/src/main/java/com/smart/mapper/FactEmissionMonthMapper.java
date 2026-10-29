@@ -144,18 +144,24 @@ public interface FactEmissionMonthMapper extends BaseMapper<FactEmissionMonth> {
                                                      @Param("year") int year,
                                                      @Param("month") int month);
 
-    /** 全量检测数据点：区县×行业×能源×月（供孤立森林批量检测） */
+    /** 全量检测数据点：区县×行业×能源×月（供孤立森林批量检测；仅直接能源 energy_id≤6——
+     *  电力/热力为间接排放单列展示、不计总量，不参与异常检测，与阈值规则口径一致） */
     @Select("SELECT region_id AS regionId, industry_id AS industryId, energy_id AS energyId, " +
             "year, month, ROUND(SUM(emission), 2) AS emission " +
-            "FROM fact_emission_month GROUP BY region_id, industry_id, energy_id, year, month " +
+            "FROM fact_emission_month WHERE energy_id <= 6 " +
+            "GROUP BY region_id, industry_id, energy_id, year, month " +
             "ORDER BY region_id, industry_id, energy_id, year, month")
     List<AnomalyPointVO> selectAnomalyPoints();
 
-    /** 行业月度排放（阈值环比扫描用） */
-    @Select("SELECT industry_id AS industryId, year, month, ROUND(SUM(emission), 2) AS emission " +
-            "FROM fact_emission_month GROUP BY industry_id, year, month " +
-            "ORDER BY industry_id, year, month")
-    List<AnomalyPointVO> selectIndustryMonthly();
+    /** 行业×能源月度排放（阈值扫描用，全国口径；directOnly=true 仅直接能源 energy_id≤6，与平台总量口径一致） */
+    @Select("<script>" +
+            "SELECT industry_id AS industryId, energy_id AS energyId, year, month, ROUND(SUM(emission), 2) AS emission " +
+            "FROM fact_emission_month WHERE 1=1 " +
+            "<if test='directOnly'> AND energy_id &lt;= 6</if> " +
+            "GROUP BY industry_id, energy_id, year, month " +
+            "ORDER BY industry_id, energy_id, year, month" +
+            "</script>")
+    List<AnomalyPointVO> selectIndustryEnergyMonthly(@Param("directOnly") boolean directOnly);
 
     /** 指定市：跨年连续月度排放序列 */
     @Select("SELECT (year - #{startYear}) * 12 + month AS t, ROUND(SUM(emission), 2) AS emission " +

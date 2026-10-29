@@ -155,6 +155,7 @@ import { VueCropper } from 'vue-cropper'
 import 'vue-cropper/dist/index.css'
 import { changePasswordApi, updateProfileApi, uploadAvatarApi } from '@/api/user'
 import { useUserStore } from '@/store/user'
+import { useAvatar } from '@/utils/avatar'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -171,12 +172,8 @@ const displayName = computed(
 )
 const avatarText = computed(() => displayName.value.charAt(0).toUpperCase())
 
-// 头像访问地址：后端返回相对路径（/uploads/images/xxx），拼接后端地址
-const API_BASE = window.APP_CONFIG?.API_BASE || '/api'
-const avatarUrl = computed(() => {
-  const a = userStore.userInfo?.avatar
-  return a ? API_BASE + a : ''
-})
+// 头像：经后端接口流式获取（与知识库文件链路一致，不依赖 /uploads/** 静态映射）
+const avatarUrl = useAvatar(() => userStore.userInfo?.avatar)
 // 注册时间只显示到日
 const createTimeText = computed(() => (userStore.userInfo?.createTime || '—').slice(0, 10))
 

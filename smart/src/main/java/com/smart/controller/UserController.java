@@ -1,7 +1,9 @@
 package com.smart.controller;
 
 import cn.dev33.satoken.annotation.SaCheckRole;
+import cn.dev33.satoken.stp.StpUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.smart.common.BizException;
 import com.smart.common.Result;
 import com.smart.dto.PasswordDTO;
 import com.smart.dto.ProfileDTO;
@@ -12,6 +14,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,6 +27,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 
 /**
@@ -95,5 +102,20 @@ public class UserController {
     @PostMapping("/avatar")
     public Result<Map<String, String>> uploadAvatar(@RequestParam("file") MultipartFile file) {
         return Result.ok(Map.of("avatar", sysUserService.uploadAvatar(file)));
+    }
+
+    @Operation(summary = "获取本人头像（流式返回，与知识库文件链路一致，不依赖静态资源映射）")
+    @GetMapping("/avatar")
+    public ResponseEntity<byte[]> avatarFile() {
+        Path path = sysUserService.avatarPath(StpUtil.getLoginIdAsLong());
+        try {
+            byte[] bytes = Files.readAllBytes(path);
+            String name = path.getFileName().toString();
+            String ext = name.contains(".") ? name.substring(name.lastIndexOf('.') + 1).toLowerCase() : "png";
+            MediaType mediaType = "jpg".equals(ext) || "jpeg".equals(ext) ? MediaType.IMAGE_JPEG : MediaType.IMAGE_PNG;
+            return ResponseEntity.ok().contentType(mediaType).body(bytes);
+        } catch (IOException e) {
+            throw new BizException("头像文件读取失败");
+        }
     }
 }

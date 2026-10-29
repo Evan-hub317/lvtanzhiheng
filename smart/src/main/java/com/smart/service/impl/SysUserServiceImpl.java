@@ -224,6 +224,22 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         }
     }
 
+    @Override
+    public Path avatarPath(long userId) {
+        SysUser user = getById(userId);
+        if (user == null || !StringUtils.hasText(user.getAvatar())) {
+            throw new BizException("未上传头像");
+        }
+        // /uploads/ 相对路径按 upload-dir 解析（与上传写入同源）；兼容知识库同款的绝对路径存法
+        Path path = user.getAvatar().startsWith("/uploads/")
+                ? Paths.get(uploadDir, user.getAvatar().substring("/uploads/".length()))
+                : Paths.get(user.getAvatar());
+        if (!Files.exists(path)) {
+            throw new BizException("头像文件不存在（可能已被清理）");
+        }
+        return path;
+    }
+
     private LoginVO buildVO(SysUser user, String token) {
         LoginVO vo = new LoginVO();
         vo.setToken(token);

@@ -24,7 +24,7 @@
 2. **碳排放热力图**：时段选择（精细到月，全年/今年至今/近一年快捷项）+ 地图热力 + 省级行政区 TOP10 + 行业结构与能源结构（直接/间接），点击省份下钻时段详情
 3. **数据分析**：年度/月度粒度切换（月度可选中某月高亮），年度趋势（总量/人均）、月度排放（总量/人均）、行业/能源结构、省级行政区/地级行政区排行（总量/人均、名次标注、选中区域高亮定位）、排放明细（年/月粒度、等级筛选、多字段排序）
 4. **情景仿真**：基线预测（LSTM）与政策仿真（历史增速校准 + 政策逐年深化 + 省级基准参数），蒙特卡洛预测区间、达峰识别、情景保存/重命名/删除叠加对比
-5. **预警中心**：阈值规则扫描（每日自动）+ 孤立森林 AI 异常检测，处置闭环
+5. **预警中心**：阈值规则扫描（行业×能源粒度，规则名标注具体能源，每日自动）+ 孤立森林 AI 异常检测（全局归一化异常分数），两条链路均为直接排放口径（电力/热力为间接排放不参与），处置闭环
 6. **AI 知识库**：知识库上传（txt/md/pdf/docx）→ 流式 RAG 问答 → 会话留痕；下载/渲染进度条；删除文档同步清理原文件
 7. **AI 分析助手**：对话式分析 Agent——14 个工具自主编排（查询/预测/仿真/异常检测/阈值判断/报告），DeepSeek 主模型 + 千问备用模型故障转移，SSE 流式执行链路可视化，多轮会话有记忆
 8. **监测报告**：年报/月报一键生成（AI 撰写 + 趋势/结构附图），打印导出 PDF
@@ -142,7 +142,7 @@ npm run dev
 
 ```bash
 # 后端启动命令（绝对 upload-dir 摆脱工作目录依赖）
-/www/server/java/jdk-17.0.8/bin/java -jar -Xmx1024M -Xms256M /www/wwwroot/shienhao/smart/smart/smart-0.0.1-SNAPSHOT.jar --server.port=8080 --app.upload-dir=/www/wwwroot/shienhao/smart/smart/uploads
+/www/server/java/jdk-17.0.8/bin/java -jar -Xmx2048M -Xms256M /www/wwwroot/shienhao/smart/smart/smart-0.0.1-SNAPSHOT.jar --server.port=8080 --app.upload-dir=/www/wwwroot/shienhao/smart/smart/uploads
 ```
 
 - **目录布局**：jar 同级放 `uploads/kb/`（知识库原文件）；可选放 `prompts/`（提示词热改）

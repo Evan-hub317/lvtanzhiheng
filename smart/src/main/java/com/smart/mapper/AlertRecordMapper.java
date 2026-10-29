@@ -14,7 +14,7 @@ public interface AlertRecordMapper extends BaseMapper<AlertRecord> {
     /** 预警分页（含区域/行业名称） */
     @Select("<script>" +
             "SELECT a.id, a.detect_type AS detectType, a.rule_name AS ruleName, " +
-            "a.region_id AS regionId, r.region_name AS regionName, " +
+            "a.region_id AS regionId, IFNULL(r.region_name, IF(a.region_id = 1, '全国', NULL)) AS regionName, " +
             "a.industry_id AS industryId, i.industry_name AS industryName, " +
             "a.year, a.month, a.actual_value AS actualValue, a.threshold_value AS thresholdValue, " +
             "a.anomaly_score AS anomalyScore, a.status, a.handler, " +

@@ -61,4 +61,10 @@ public interface SysUserService extends IService<SysUser> {
      * 上传本人头像：保存到 uploads/images 并更新库，返回头像相对路径
      */
     String uploadAvatar(org.springframework.web.multipart.MultipartFile file);
+
+    /**
+     * 解析用户头像文件路径（未上传/文件缺失抛异常）：/uploads/ 相对路径按 upload-dir 解析（写读同源），
+     * 兼容知识库同款的绝对路径存法
+     */
+    java.nio.file.Path avatarPath(long userId);
 }

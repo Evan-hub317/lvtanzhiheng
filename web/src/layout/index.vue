@@ -92,6 +92,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/store/user'
+import { useAvatar } from '@/utils/avatar'
 
 // App 级 keep-alive 缓存名：跳转大屏（布局外顶级路由）时 Layout 仅休眠不销毁，
 // 内部各页面的 keep-alive 缓存得以保留，返回时不整页重载
@@ -168,12 +169,8 @@ const displayName = computed(
   () => userStore.userInfo?.realName || userStore.userInfo?.username || '用户'
 )
 const avatarText = computed(() => displayName.value.charAt(0).toUpperCase())
-// 头像地址：后端返回相对路径（/uploads/images/xxx），拼接后端地址；未上传为空
-const API_BASE = window.APP_CONFIG?.API_BASE || '/api'
-const avatarUrl = computed(() => {
-  const a = userStore.userInfo?.avatar
-  return a ? API_BASE + a : ''
-})
+// 头像：经后端接口流式获取（与知识库文件链路一致，不依赖 /uploads/** 静态映射）；未上传为空
+const avatarUrl = useAvatar(() => userStore.userInfo?.avatar)
 
 async function handleCommand(cmd) {
   if (cmd === 'profile') {

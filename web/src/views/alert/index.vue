@@ -28,7 +28,7 @@
               <el-button type="primary" :loading="detecting" @click="handleAnomaly">AI 异常检测</el-button>
             </div>
           </template>
-          <p class="action-tip">阈值扫描每天 02:00 自动执行；AI 检测对全量数据建模（约 10~30 秒）</p>
+          <p class="action-tip">阈值扫描每天 02:00 自动执行；AI 检测对全量数据建模（约 20~40 秒）</p>
         </div>
       </el-col>
     </el-row>
@@ -57,10 +57,10 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column align="center" prop="ruleName" label="规则 / 能源品种" min-width="170" />
+        <el-table-column align="center" prop="ruleName" label="规则 / 能源品种" min-width="250" />
         <el-table-column align="center" prop="regionName" label="区域" width="110" />
         <el-table-column align="center" prop="industryName" label="行业" width="100">
-          <template #default="{ row }">{{ row.industryName || '全省' }}</template>
+          <template #default="{ row }">{{ row.industryName || '—' }}</template>
         </el-table-column>
         <el-table-column align="center" label="时间" width="100">
           <template #default="{ row }">{{ row.year }}{{ row.month ? '-' + row.month : '' }}</template>
@@ -170,7 +170,7 @@ async function handleScan() {
 
 async function handleAnomaly() {
   await ElMessageBox.confirm(
-    '对全量核算数据执行孤立森林异常检测（约 10~30 秒），检测异常排放点。是否继续？',
+    '对全量核算数据（直接能源口径）执行孤立森林异常检测（约 20~40 秒），检测异常排放点。是否继续？',
     'AI 异常检测',
     { type: 'warning' }
   )

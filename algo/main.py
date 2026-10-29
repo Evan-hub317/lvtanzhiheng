@@ -440,13 +440,14 @@ def anomaly(req: AnomalyReq):
                     "raw": float(raw[i]),   # 原始异常度，稍后全局归一
                 })
     # 全局归一化：所有检出点统一映射到 0~1（唯一最高分）
+    # 注意：调用方可能分批调用（避免大 JSON 一次驻留内存），此时各批 score 仅批内可比；
+    # 因此保留 raw 字段，由调用方合并各批结果后重做全局归一化
     if results:
         raws = [r["raw"] for r in results]
         lo, hi = min(raws), max(raws)
         span = (hi - lo) if hi > lo else 1e-9
         for r in results:
             r["score"] = round((hi - r["raw"]) / span, 4)
-            r.pop("raw", None)
     results.sort(key=lambda r: -r["score"])
     return {"code": 200, "data": results}
 
